@@ -47,14 +47,15 @@ def get_score_keyboard():
         InlineKeyboardButton("60%", callback_data="score_60")
     )
     markup.add(
+        InlineKeyboardButton("65%", callback_data="score_65"),
         InlineKeyboardButton("70%", callback_data="score_70"),
-        InlineKeyboardButton("80%", callback_data="score_80"),
-        InlineKeyboardButton("90%", callback_data="score_90")
+        InlineKeyboardButton("80%", callback_data="score_80")
     )
     markup.add(
-        InlineKeyboardButton("99%", callback_data="score_99"),
-        InlineKeyboardButton("⬅️ Back", callback_data="back_main")
+        InlineKeyboardButton("90%", callback_data="score_90"),
+        InlineKeyboardButton("99%", callback_data="score_99")
     )
+    markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
     return markup
 
 def get_market_keyboard():
