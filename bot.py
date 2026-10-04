@@ -8,8 +8,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # --- CONFIG - Railway Variables se ---
-TOKEN = os.getenv("8722261999:AAF5_67b8rMkAf8tJEEC6BKAlkNPsS2CWoE")
-CHAT_ID = os.getenv("5976851878")
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 OTC_PAIRS = ["EUR/USD OTC","GBP/USD OTC","USD/JPY OTC","AUD/USD OTC","EUR/JPY OTC","GBP/JPY OTC","EUR/GBP OTC","USD/CHF OTC","EUR/AUD OTC","GBP/AUD OTC","AUD/JPY OTC","CHF/JPY OTC","EUR/CAD OTC","GBP/CAD OTC","AUD/CAD OTC","NZD/USD OTC","EUR/NZD OTC","USD/CAD OTC"]
 LIVE_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/JPY","GBP/JPY"]
