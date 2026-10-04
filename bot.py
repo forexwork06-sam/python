@@ -1,20 +1,30 @@
 import os
-import asyncio
 import logging
 import numpy as np
 import pandas as pd
+import yfinance as yf
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# --- CONFIG - Railway Variables se ---
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 OTC_PAIRS = ["EUR/USD OTC","GBP/USD OTC","USD/JPY OTC","AUD/USD OTC","EUR/JPY OTC","GBP/JPY OTC","EUR/GBP OTC","USD/CHF OTC","EUR/AUD OTC","GBP/AUD OTC","AUD/JPY OTC","CHF/JPY OTC","EUR/CAD OTC","GBP/CAD OTC","AUD/CAD OTC","NZD/USD OTC","EUR/NZD OTC","USD/CAD OTC"]
 LIVE_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/JPY","GBP/JPY"]
+
+# Yahoo Finance mapping for real data
+YF_MAP = {
+    "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X", "USD/JPY": "USDJPY=X",
+    "AUD/USD": "AUDUSD=X", "USD/CAD": "USDCAD=X", "EUR/JPY": "EURJPY=X",
+    "GBP/JPY": "GBPJPY=X", "USD/CHF": "USDCHF=X", "EUR/GBP": "EURGBP=X",
+    "EUR/AUD": "EURAUD=X", "GBP/AUD": "GBPAUD=X", "AUD/JPY": "AUDJPY=X",
+    "CHF/JPY": "CHFJPY=X", "EUR/CAD": "EURCAD=X", "GBP/CAD": "GBPCAD=X",
+    "AUD/CAD": "AUDCAD=X", "NZD/USD": "NZDUSD=X", "EUR/NZD": "EURNZD=X"
+}
+
 selected_pairs = OTC_PAIRS
-selected_timeframe = "1 min"
+selected_timeframe = "1m"
 bot_active = False
 
 logging.basicConfig(level=logging.INFO)
@@ -52,91 +62,122 @@ def get_signal_analysis(df):
     df = stochastic(df)
     df = cci(df)
     df['rsi'] = rsi(df['close'])
+    if len(df) < 30: return None
     score = 0
     breakdown = []
     direction = None
-    entry_triggers = []
+    triggers = []
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
     if last['close'] > last['open'] and last['low'] < last['lower'] * 1.001:
-        score += 30; breakdown.append("• Price Action (30pts): Bullish +30"); entry_triggers.append("Price Action Bullish"); direction = "BUY"
+        score += 30; breakdown.append("Price Action: Bullish +30"); triggers.append("Price Action Bullish"); direction = "BUY"
     elif last['close'] < last['open'] and last['high'] > last['upper'] * 0.999:
-        score += 30; breakdown.append("• Price Action (30pts): Bearish +30"); entry_triggers.append("Price Action Bearish"); direction = "SELL"
-    else: breakdown.append("• Price Action (30pts): Neutral +0")
-
+        score += 30; breakdown.append("Price Action: Bearish +30"); triggers.append("Price Action Bearish"); direction = "SELL"
+    
     if last['close'] < last['lower'] and last['close'] > last['open']:
-        score += 30; breakdown.append("• Bollinger Band Bounce (30pts): Bullish +30"); direction = "BUY" if direction is None else direction; entry_triggers.append("Bollinger Lower Bounce")
+        score += 30; breakdown.append("Bollinger Bounce: Bullish +30"); direction = "BUY" if not direction else direction; triggers.append("Bollinger Lower Bounce")
     elif last['close'] > last['upper'] and last['close'] < last['open']:
-        score += 30; breakdown.append("• Bollinger Band Bounce (30pts): Bearish +30"); direction = "SELL" if direction is None else direction; entry_triggers.append("Bollinger Upper Rejection")
-    else: breakdown.append("• Bollinger Band Bounce (30pts): Neutral +0")
+        score += 30; breakdown.append("Bollinger Bounce: Bearish +30"); direction = "SELL" if not direction else direction; triggers.append("Bollinger Upper Rejection")
 
     if last['rsi'] < 35:
-        score += 25; breakdown.append(f"• RSI Divergence (25pts): Bullish +25 (RSI {last['rsi']:.1f})"); direction = "BUY" if direction is None else direction; entry_triggers.append(f"RSI Oversold {last['rsi']:.1f}")
+        score += 25; breakdown.append(f"RSI: Bullish +25 ({last['rsi']:.1f})"); direction = "BUY" if not direction else direction; triggers.append(f"RSI Oversold {last['rsi']:.1f}")
     elif last['rsi'] > 65:
-        score += 25; breakdown.append(f"• RSI Divergence (25pts): Bearish +25 (RSI {last['rsi']:.1f})"); direction = "SELL" if direction is None else direction; entry_triggers.append(f"RSI Overbought {last['rsi']:.1f}")
-    else: breakdown.append("• RSI Divergence (25pts): Neutral +0")
-
-    if last['%K'] < 20 and last['%K'] > last['%D'] and prev['%K'] <= prev['%D']:
-        score += 20; breakdown.append("• Stochastic Cross (20pts): Bullish +20"); direction = "BUY" if direction is None else direction; entry_triggers.append("Stoch Bullish Cross")
-    elif last['%K'] > 80 and last['%K'] < last['%D'] and prev['%K'] >= prev['%D']:
-        score += 20; breakdown.append("• Stochastic Cross (20pts): Bearish +20"); direction = "SELL" if direction is None else direction; entry_triggers.append("Stoch Bearish Cross")
-    else: breakdown.append("• Stochastic Cross (20pts): Neutral +0")
-
-    if last['cci'] < -100:
-        score += 15; breakdown.append(f"• CCI Extreme (15pts): Bullish +15 (CCI {last['cci']:.0f})"); direction = "BUY" if direction is None else direction; entry_triggers.append(f"CCI Extreme {last['cci']:.0f}")
-    elif last['cci'] > 100:
-        score += 15; breakdown.append(f"• CCI Extreme (15pts): Bearish +15 (CCI {last['cci']:.0f})"); direction = "SELL" if direction is None else direction; entry_triggers.append(f"CCI Extreme {last['cci']:.0f}")
-    else: breakdown.append("• CCI Extreme (15pts): Neutral +0")
-
-    if last['close'] > last['open'] and prev['close'] < prev['open'] and last['close'] > prev['open']:
-        score += 10; breakdown.append("• Candlestick Pattern (10pts): Bullish Engulfing +10"); entry_triggers.append("Bullish Engulfing"); direction = "BUY" if direction is None else direction
-    elif last['close'] < last['open'] and prev['close'] > prev['open'] and last['close'] < prev['open']:
-        score += 10; breakdown.append("• Candlestick Pattern (10pts): Bearish Engulfing +10"); entry_triggers.append("Bearish Engulfing"); direction = "SELL" if direction is None else direction
-    else: breakdown.append("• Candlestick Pattern (10pts): Neutral +0")
+        score += 25; breakdown.append(f"RSI: Bearish +25 ({last['rsi']:.1f})"); direction = "SELL" if not direction else direction; triggers.append(f"RSI Overbought {last['rsi']:.1f}")
 
     if score < 60: return None
-    confidence = 60 + (score - 60) * (39 / 70)
-    confidence = min(99, max(60, confidence))
-    return {"direction": direction, "score": score, "confidence": round(confidence,1), "breakdown": breakdown, "triggers": entry_triggers}
+    conf = 60 + (score - 60) * (30/70)
+    return {"direction": direction, "score": score, "confidence": round(min(90, max(60, conf)),1), "breakdown": breakdown, "triggers": triggers}
 
 def main_menu():
-    keyboard = [[InlineKeyboardButton("▶️ Start Bot", callback_data='start_bot')], [InlineKeyboardButton("⏹️ Stop Bot", callback_data='stop_bot')], [InlineKeyboardButton("📊 OTC (18)", callback_data='set_otc'), InlineKeyboardButton("📈 LIVE (7)", callback_data='set_live')]]
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Start Bot", callback_data='start_bot'), InlineKeyboardButton("⏹ Stop Bot", callback_data='stop_bot')],
+        [InlineKeyboardButton("📊 Select Market", callback_data='menu_market'), InlineKeyboardButton("⏰ Timeframe", callback_data='menu_tf')],
+        [InlineKeyboardButton("📈 Status", callback_data='status')]
+    ])
+
+def market_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("OTC (18 Pairs)", callback_data='set_otc')],
+        [InlineKeyboardButton("LIVE (7 Pairs)", callback_data='set_live')],
+        [InlineKeyboardButton("⬅️ Back", callback_data='back_main')]
+    ])
+
+def timeframe_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1 Min", callback_data='tf_1m'), InlineKeyboardButton("5 Min", callback_data='tf_5m')],
+        [InlineKeyboardButton("⬅️ Back", callback_data='back_main')]
+    ])
 
 async def start_cmd(update, context):
-    await update.message.reply_text(f"🤖 Forex Bot Ready\nMin 60 Points = 60% Confidence\nID: {CHAT_ID}", reply_markup=main_menu())
+    await update.message.reply_text(f"🤖 Forex Bot Ready (Real Data)\nMarket: {len(selected_pairs)} pairs\nTF: {selected_timeframe}", reply_markup=main_menu())
 
 async def button_handler(update, context):
-    global selected_pairs, bot_active
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'start_bot': bot_active = True; await query.edit_message_text("✅ Bot Started! Scanning...", reply_markup=main_menu())
-    elif query.data == 'stop_bot': bot_active = False; await query.edit_message_text("⛔ Bot Stopped", reply_markup=main_menu())
-    elif query.data == 'set_otc': selected_pairs = OTC_PAIRS; await query.edit_message_text("✅ OTC (18) Selected", reply_markup=main_menu())
-    elif query.data == 'set_live': selected_pairs = LIVE_PAIRS; await query.edit_message_text("✅ LIVE (7) Selected", reply_markup=main_menu())
+    global selected_pairs, bot_active, selected_timeframe
+    q = update.callback_query
+    await q.answer()
+    if q.data == 'start_bot':
+        bot_active = True
+        await q.edit_message_text(f"✅ Bot Started!\nReal scanning {len(selected_pairs)} pairs / {selected_timeframe}", reply_markup=main_menu())
+    elif q.data == 'stop_bot':
+        bot_active = False
+        await q.edit_message_text("🛑 Bot Stopped", reply_markup=main_menu())
+    elif q.data == 'menu_market':
+        await q.edit_message_text("Select Market:", reply_markup=market_menu())
+    elif q.data == 'menu_tf':
+        await q.edit_message_text(f"Current: {selected_timeframe}\nSelect TF:", reply_markup=timeframe_menu())
+    elif q.data == 'set_otc':
+        selected_pairs = OTC_PAIRS
+        await q.edit_message_text("✅ OTC (18) Selected - Real Data", reply_markup=main_menu())
+    elif q.data == 'set_live':
+        selected_pairs = LIVE_PAIRS
+        await q.edit_message_text("✅ LIVE (7) Selected - Real Data", reply_markup=main_menu())
+    elif q.data == 'tf_1m':
+        selected_timeframe = "1m"
+        await q.edit_message_text("✅ TF: 1 Min set", reply_markup=main_menu())
+    elif q.data == 'tf_5m':
+        selected_timeframe = "5m"
+        await q.edit_message_text("✅ TF: 5 Min set", reply_markup=main_menu())
+    elif q.data == 'back_main':
+        await q.edit_message_text(f"🤖 Ready\nPairs: {len(selected_pairs)}\nTF: {selected_timeframe}", reply_markup=main_menu())
+    elif q.data == 'status':
+        s = "ACTIVE 🟢" if bot_active else "STOPPED 🔴"
+        await q.edit_message_text(f"Status: {s}\nPairs: {len(selected_pairs)}\nTF: {selected_timeframe}", reply_markup=main_menu())
 
-def get_dummy_df():
-    closes = np.random.normal(1.1, 0.001, 50)
-    return pd.DataFrame({'open': closes, 'high': closes+0.0005, 'low': closes-0.0005, 'close': closes})
+def get_real_df(pair_name):
+    base = pair_name.replace(" OTC","")
+    yf_symbol = YF_MAP.get(base)
+    if not yf_symbol: return None
+    df = yf.download(yf_symbol, period="1d", interval=selected_timeframe, progress=False, auto_adjust=True)
+    if df.empty or len(df) < 30: return None
+    df.columns = [c.lower() for c in df.columns]
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df[['open','high','low','close']].dropna()
 
 async def scanner(context):
     if not bot_active: return
     for pair in selected_pairs:
-        df = get_dummy_df()
+        df = get_real_df(pair)
+        if df is None: continue
         analysis = get_signal_analysis(df)
         if analysis:
             emoji = "🟢" if analysis['direction'] == "BUY" else "🔴"
-            triggers_text = "\n".join([f"  {i+1}. {t}" for i, t in enumerate(analysis['triggers'])])
-            breakdown_text = "\n".join(analysis['breakdown'])
-            msg = f"{emoji} {analysis['direction']} SIGNAL {emoji}\n━━━━━━━━━━━━━━━\nPair: {pair}\nTimeframe: {selected_timeframe}\nDirection: {analysis['direction']}\n\n🎯 ENTRY TRIGGERS ({len(analysis['triggers'])}):\n{triggers_text}\n\n📊 6-FACTOR BREAKDOWN:\n{breakdown_text}\n\nCONFLUENCE SCORE: {analysis['score']}/130\nCONFIDENCE: {analysis['confidence']}%\n━━━━━━━━━━━━━━━\nTime: {datetime.now().strftime('%H:%M:%S')} IST"
-            await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+            trig = "\n".join([f"{i+1}. {t}" for i,t in enumerate(analysis['triggers'])])
+            brk = "\n".join(analysis['breakdown'])
+            msg = f"{emoji} {analysis['direction']} SIGNAL {emoji}\nPair: {pair}\nTF: {selected_timeframe}\nDir: {analysis['direction']}\nConf: {analysis['confidence']}% ({analysis['score']} pts)\n\nTriggers:\n{trig}\n\nBreakdown:\n{brk}\n\n{datetime.now().strftime('%H:%M:%S')}"
+            try:
+                await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+            except Exception as e:
+                logging.error(e)
 
 def main():
+    if not TOKEN or not CHAT_ID:
+        logging.error("TOKEN/CHAT_ID missing!")
+        return
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.job_queue.run_repeating(scanner, interval=10, first=5)
+    app.job_queue.run_repeating(scanner, interval=60, first=10)
     app.run_polling()
 
 if __name__ == "__main__":
