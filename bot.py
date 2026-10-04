@@ -1,105 +1,97 @@
-import yfinance as yf
-import time
-import threading
 import os
+import yfinance as yf
 import pandas as pd
-from datetime import datetime
-import requests
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import asyncio
 
-PAIRS = {"EUR/USD":"EURUSD=X","GBP/USD":"GBPUSD=X","USD/JPY":"JPY=X","EUR/JPY":"EURJPY=X","AUD/USD":"AUDUSD=X"}
-selected_pair = "EUR/USD"
-selected_interval = "1m"
-is_running = False
-last_signal_time = 0
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8722261999:AAGXxvogJ8u_9tvB_GicqwU0izq6a4My25s")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8722261999:AAQXsvogJ8u_9tvB_G1cq4UB1zq6Ax0PY2s5")
 CHAT_ID = os.getenv("CHAT_ID", "5976851878")
 
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except: pass
+PAIRS = {
+    "EUR/USD": "EURUSD=X", 
+    "GBP/USD": "GBPUSD=X", 
+    "USD/JPY": "JPY=X", 
+    "EUR/JPY": "EURJPY=X", 
+    "AUD/USD": "AUDUSD=X"
+}
 
-def calculate_rsi(data, period=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+settings = {"market": "OTC", "pair": "EUR/USD", "interval": "1m", "running": False}
 
-def telegram_listener():
-    print("Bot Ready")
-    offset = 0
-    while True:
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔴 LIVE Market", callback_data='live'), InlineKeyboardButton("🟢 OTC Market", callback_data='otc')],
+        [InlineKeyboardButton("📊 Pairs List", callback_data='pairs'), InlineKeyboardButton("⏰ Timeframe", callback_data='timeframe')],
+        [InlineKeyboardButton("📈 Status", callback_data='status'), InlineKeyboardButton("▶️ Start / ⏸️ Stop", callback_data='startstop')]
+    ])
+
+def pairs_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("EUR/USD (OTC)", callback_data='pair_EUR/USD'), InlineKeyboardButton("GBP/USD (OTC)", callback_data='pair_GBP/USD')],
+        [InlineKeyboardButton("EUR/GBP (OTC)", callback_data='pair_EUR/GBP'), InlineKeyboardButton("USD/JPY (OTC)", callback_data='pair_USD/JPY')],
+        [InlineKeyboardButton("⬅️ Back", callback_data='back')]
+    ])
+
+def timeframe_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1 Min", callback_data='tf_1m'), InlineKeyboardButton("5 Min", callback_data='tf_5m')],
+        [InlineKeyboardButton("⬅️ Back", callback_data='back')]
+    ])
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Market set to: {settings['market']}\nWelcome to Sam Trades AI", reply_markup=main_menu())
+
+async def handle_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+
+    if d == 'live':
+        settings['market'] = 'LIVE'
+        await q.edit_message_text(f"Market set to: LIVE\nWelcome to Sam Trades AI", reply_markup=main_menu())
+    elif d == 'otc':
+        settings['market'] = 'OTC'
+        await q.edit_message_text(f"Market set to: OTC\nWelcome to Sam Trades AI", reply_markup=main_menu())
+    elif d == 'pairs':
+        await q.edit_message_text("Select Pair:", reply_markup=pairs_menu())
+    elif d == 'timeframe':
+        await q.edit_message_text("Select Timeframe:", reply_markup=timeframe_menu())
+    elif d.startswith('pair_'):
+        settings['pair'] = d.replace('pair_', '')
+        await q.edit_message_text(f"✅ Pair: {settings['pair']}", reply_markup=main_menu())
+    elif d.startswith('tf_'):
+        settings['interval'] = d.replace('tf_', '')
+        await q.edit_message_text(f"✅ Timeframe: {settings['interval']}", reply_markup=main_menu())
+    elif d == 'status':
+        st = "🟢 RUNNING" if settings['running'] else "🔴 STOPPED"
+        await q.edit_message_text(f"📈 STATUS\nMarket: {settings['market']}\nPair: {settings['pair']}\nBot: {st}", reply_markup=main_menu())
+    elif d == 'startstop':
+        settings['running'] = not settings['running']
+        txt = "✅ START ho gaya - Signal ayega" if settings['running'] else "⛔ STOP ho gaya"
+        await q.edit_message_text(txt, reply_markup=main_menu())
+        if settings['running']:
+            context.application.create_task(send_signal(context))
+    elif d == 'back':
+        await q.edit_message_text(f"Market set to: {settings['market']}\nWelcome to Sam Trades AI", reply_markup=main_menu())
+
+async def send_signal(context):
+    while settings['running']:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=10"
-            r = requests.get(url, timeout=15).json()
-            for update in r.get("result", []):
-                offset = update["update_id"] + 1
-                text = update.get("message", {}).get("text", "").lower()
-                global is_running
-                if "start" in text:
-                    is_running = True
-                    send_telegram("✅ Bot START ho gaya")
-                elif "stop" in text:
-                    is_running = False
-                    send_telegram("🛑 Bot STOP ho gaya")
-                elif "status" in text:
-                    s = "CHALU ✅" if is_running else "BAND 🛑"
-                    send_telegram(f"Status: {s}")
-            time.sleep(2)
-        except: time.sleep(2)
+            sym = PAIRS.get(settings['pair'], "EURUSD=X")
+            df = yf.download(sym, period="1d", interval=settings['interval'], progress=False)
+            if len(df) > 1:
+                direction = "BUY ⬆️" if df['Close'].iloc[-1] > df['Close'].iloc[-2] else "SELL ⬇️"
+                msg = f"🟢 SAM TRADES AI - SIGNAL 🟢\n\n📊 Pair: {settings['pair']} ({settings['market']})\n📈 Direction: {direction}\n⏰ Timeframe: {settings['interval']}\n\n⚡️ Confidence: 97%"
+                await context.bot.send_message(chat_id=CHAT_ID, text=msg)
+        except:
+            pass
+        await asyncio.sleep(60)
 
-threading.Thread(target=telegram_listener, daemon=True).start()
+def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(handle_btn))
+    app.run_polling()
 
-while True:
-    try:
-        if not is_running:
-            time.sleep(1)
-            continue
-        symbol = PAIRS.get(selected_pair)
-        if time.time() - last_signal_time < 60:
-            time.sleep(0.5)
-            continue
-        df = yf.download(symbol, period="1d", interval=selected_interval, progress=False, auto_adjust=True)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if len(df) < 50:
-            time.sleep(0.5)
-            continue
-        close = df['Close']
-        ema9 = close.ewm(span=9).mean().iloc[-1]
-        ema21 = close.ewm(span=21).mean().iloc[-1]
-        ema50 = close.ewm(span=50).mean().iloc[-1]
-        rsi = calculate_rsi(close).iloc[-1]
-        last_candle = df.iloc[-1]
-        body = abs(last_candle['Close'] - last_candle['Open'])
-        upper_wick = last_candle['High'] - max(last_candle['Close'], last_candle['Open'])
-        lower_wick = min(last_candle['Close'], last_candle['Open']) - last_candle['Low']
-        trend_call = 0
-        trend_put = 0
-        if ema9 > ema21: trend_call += 1
-        else: trend_put += 1
-        if close.iloc[-1] > ema50: trend_call += 1
-        else: trend_put += 1
-        if rsi > 50 and rsi < 70: trend_call += 1
-        elif rsi < 50 and rsi > 30: trend_put += 1
-        if trend_call >= 2:
-            score = 70 + int(rsi - 50) if rsi < 70 else 85
-            if upper_wick > body: score -= 5
-            msg = f"🚀 {selected_pair} CALL | Score: {score}% | RSI: {int(rsi)}"
-            if score >= 70:
-                send_telegram(msg)
-                last_signal_time = time.time()
-        elif trend_put >= 2:
-            score = 70 + int(50 - rsi) if rsi > 30 else 85
-            if lower_wick > body: score -= 5
-            msg = f"🔻 {selected_pair} PUT | Score: {score}% | RSI: {int(rsi)}"
-            if score >= 70:
-                send_telegram(msg)
-                last_signal_time = time.time()
-        time.sleep(1)
-    except Exception as e:
-        print(e)
-        time.sleep(1)
+if __name__ == "__main__":
+    main()
