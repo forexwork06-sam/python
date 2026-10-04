@@ -6,8 +6,10 @@ import yfinance as yf
 import pandas as pd
 import ta
 
+import os
 # --- CONFIG ---
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE" # apna token yahi daal
+BOT_TOKEN = os.getenv("BOT_TOKEN") # Railway Variable se lega
+CHAT_ID = os.getenv("CHAT_ID")
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- GLOBAL SETTINGS (Purana wala same) ---
