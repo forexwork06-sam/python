@@ -68,18 +68,18 @@ def get_market_keyboard():
     return markup
 
 def get_timeframe_keyboard():
-    markup = InlineKeyboardMarkup(row_width=4)
+    markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("1m", callback_data="timeframe_1m"),
-        InlineKeyboardButton("3m", callback_data="timeframe_3m"),
-        InlineKeyboardButton("5m", callback_data="timeframe_5m"),
-        InlineKeyboardButton("15m", callback_data="timeframe_15m")
+        InlineKeyboardButton("1m", callback_data="tf_1m"),
+        InlineKeyboardButton("3m", callback_data="tf_3m"),
+        InlineKeyboardButton("5m", callback_data="tf_5m"),
+        InlineKeyboardButton("15m", callback_data="tf_15m")
     )
     markup.add(
-        InlineKeyboardButton("30m", callback_data="timeframe_30m"),
-        InlineKeyboardButton("1h", callback_data="timeframe_1h"),
-        InlineKeyboardButton("4h", callback_data="timeframe_4h"),
-        InlineKeyboardButton("1d", callback_data="timeframe_1d")
+        InlineKeyboardButton("30m", callback_data="tf_30m"),
+        InlineKeyboardButton("1h", callback_data="tf_1h"),
+        InlineKeyboardButton("4h", callback_data="tf_4h"),
+        InlineKeyboardButton("1d", callback_data="tf_1d")
     )
     markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
     return markup
