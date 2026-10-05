@@ -4,7 +4,7 @@ pandas
 ta
 pytz
 yfinance
-quotexapi
+git+https://github.com/ChipaDevTeam/QuotexAPI.git
 requests
 aiohttp
 websocket-client
