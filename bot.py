@@ -10,8 +10,18 @@ import datetime
 import pytz
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-OWNER_ID = int(CHAT_ID) if CHAT_ID and CHAT_ID.lstrip('-').isdigit() else None
+
+# Support multiple owners like 5976xxx,75xxx
+OWNER_RAW = os.getenv("OWNER_ID") or os.getenv("CHAT_ID") or ""
+OWNER_IDS = []
+for x in OWNER_RAW.replace(" ", "").split(","):
+    if x.lstrip('-').isdigit():
+        OWNER_IDS.append(int(x))
+
+OWNER_ID = OWNER_IDS[0] if OWNER_IDS else None
+CHAT_ID = str(OWNER_ID) if OWNER_ID else os.getenv("CHAT_ID")
+
+print(f"Owners loaded: {OWNER_IDS}")
 IST = pytz.timezone('Asia/Kolkata')
 bot = telebot.TeleBot(BOT_TOKEN)
 
