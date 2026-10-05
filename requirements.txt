@@ -1,9 +1,9 @@
-pyTelegramBotAPI
-yfinance
-pandas
-ta
+pyTelegramBotAPI==4.14.0
+pandas==2.0.3
+ta==0.10.2
 pytz
+yfinance
+quotexapi
 requests
-git+https://github.com/cleitonleonel/pyquotex.git
-pysocks
-python-socks[asyncio]
+aiohttp
+websocket-client
