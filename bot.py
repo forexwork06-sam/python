@@ -17,7 +17,10 @@ q_client = None
 
 if QUOTEX_EMAIL and QUOTEX_PASSWORD:
     try:
-        from quotexapi.stable_api import Quotex
+        try:
+            from quotexapi.stable_api import Quotex
+        except:
+            from pyquotex.stable_api import Quotex
         USE_QUOTEX = True
         print("QUOTEX OTC MODE ENABLED")
     except Exception as e:
@@ -178,7 +181,6 @@ def scanner_loop(chat_id):
     while bot_active:
         try:
             now_ist = datetime.datetime.now(IST)
-            # FIXED - 25 SEC EARLY + 35 PAIRS SCAN WINDOW
             if now_ist.second < 35 or now_ist.second > 58:
                 time.sleep(1); continue
             next_entry_time = (now_ist + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0)
