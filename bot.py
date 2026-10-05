@@ -5,26 +5,35 @@ import threading
 import yfinance as yf
 import pandas as pd
 import ta
-
 import os
+import datetime
+
 # --- CONFIG ---
-BOT_TOKEN = os.getenv("BOT_TOKEN") # Railway Variable se lega
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+OWNER_ID = int(CHAT_ID) if CHAT_ID and CHAT_ID.lstrip('-').isdigit() else None # BOT LOCK
+
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- GLOBAL SETTINGS (Purana wala same) ---
+# --- 18 OTC + 7 LIVE = 25 PAIRS ---
+ALL_PAIRS = [
+    # OTC 18
+    "EUR/USD (OTC)", "GBP/USD (OTC)", "USD/JPY (OTC)", "AUD/USD (OTC)",
+    "EUR/GBP (OTC)", "USD/CHF (OTC)", "EUR/JPY (OTC)", "GBP/JPY (OTC)",
+    "AUD/JPY (OTC)", "EUR/AUD (OTC)", "USD/CAD (OTC)", "NZD/USD (OTC)",
+    "EUR/CAD (OTC)", "GBP/AUD (OTC)", "AUD/CAD (OTC)", "GBP/CAD (OTC)",
+    "EUR/NZD (OTC)", "GBP/NZD (OTC)",
+    # LIVE 7
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "EUR/JPY", "GBP/JPY"
+]
+
 selected_pairs = ["EUR/USD (OTC)"]
 timeframe = "1m"
 bot_active = False
-FAKE_FILTER = True
-SCORE_THRESHOLD = 63 # Default
+SCORE_THRESHOLD = 40 # 40% FIX - DEFAULT 40
+LAST_SIGNAL = {} # Double pair bug fix
 
-ALL_PAIRS = [
-    "EUR/USD (OTC)", "GBP/USD (OTC)", "USD/JPY (OTC)", "AUD/USD (OTC)",
-    "EUR/GBP (OTC)", "USD/CHF (OTC)", "EUR/JPY (OTC)", "GBP/JPY (OTC)"
-]
-
-# --- KEYBOARDS ---
+# --- KEYBOARDS (Same) ---
 def get_main_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -32,7 +41,7 @@ def get_main_keyboard():
         InlineKeyboardButton("🔴 Stop Bot", callback_data="stop_bot")
     )
     markup.add(
-        InlineKeyboardButton("📈 Select Market", callback_data="select_market"),
+        InlineKeyboardButton("📈 Select Market (25)", callback_data="select_market"),
         InlineKeyboardButton("⏱️ Timeframe", callback_data="timeframe")
     )
     markup.add(
@@ -44,7 +53,7 @@ def get_main_keyboard():
 def get_score_keyboard():
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(
-        InlineKeyboardButton("40%", callback_data="score_40"),
+        InlineKeyboardButton("40% (All)", callback_data="score_40"),
         InlineKeyboardButton("50%", callback_data="score_50"),
         InlineKeyboardButton("60%", callback_data="score_60")
     )
@@ -53,17 +62,15 @@ def get_score_keyboard():
         InlineKeyboardButton("70%", callback_data="score_70"),
         InlineKeyboardButton("80%", callback_data="score_80")
     )
-    markup.add(
-        InlineKeyboardButton("90%", callback_data="score_90"),
-        InlineKeyboardButton("99%", callback_data="score_99")
-    )
     markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
     return markup
 
 def get_market_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
     for pair in ALL_PAIRS:
-        markup.add(InlineKeyboardButton(pair, callback_data=f"pair_{pair}"))
+        # Double pair bug fix - check mark
+        check = "✅ " if pair in selected_pairs else ""
+        markup.add(InlineKeyboardButton(f"{check}{pair}", callback_data=f"pair_{pair}"))
     markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
     return markup
 
@@ -71,15 +78,7 @@ def get_timeframe_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("1m", callback_data="tf_1m"),
-        InlineKeyboardButton("3m", callback_data="tf_3m"),
         InlineKeyboardButton("5m", callback_data="tf_5m"),
-        InlineKeyboardButton("15m", callback_data="tf_15m")
-    )
-    markup.add(
-        InlineKeyboardButton("30m", callback_data="tf_30m"),
-        InlineKeyboardButton("1h", callback_data="tf_1h"),
-        InlineKeyboardButton("4h", callback_data="tf_4h"),
-        InlineKeyboardButton("1d", callback_data="tf_1d")
     )
     markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
     return markup
@@ -94,120 +93,129 @@ def calculate_score(df):
         rsi = ta.momentum.RSIIndicator(df['Close'], window=14).rsi().iloc[-1]
         stoch = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch().iloc[-1]
         stoch_signal = ta.momentum.StochasticOscillator(df['High'], df['Low'], df['Close']).stoch_signal().iloc[-1]
-        vol_avg = df['Volume'].rolling(20).mean().iloc[-1] if 'Volume' in df else 1
-        vol_curr = df['Volume'].iloc[-1] if 'Volume' in df else 1
-        vol_ratio = vol_curr / vol_avg if vol_avg!= 0 else 1
-        vol_strong = vol_ratio > 1.1
 
         score = 0
         reason = []
         signal_type = None
 
-        if close <= bb_lower:
-            score += 30
-            reason.append(f"Bollinger Bounce +30")
-            signal_type = "BUY"
-        elif close >= bb_upper:
-            score += 30
-            reason.append(f"Bollinger Rejection +30")
-            signal_type = "SELL"
+        if close <= bb_lower: score += 30; reason.append(f"Bollinger Bounce +30"); signal_type = "BUY"
+        elif close >= bb_upper: score += 30; reason.append(f"Bollinger Rejection +30"); signal_type = "SELL"
 
-        if rsi < 35 and signal_type == "BUY":
-            score += 25
-            reason.append(f"RSI Oversold {rsi:.1f} +25")
-        elif rsi > 65 and signal_type == "SELL":
-            score += 25
-            reason.append(f"RSI Overbought {rsi:.1f} +25")
+        if rsi < 38 and signal_type == "BUY": score += 25; reason.append(f"RSI Oversold {rsi:.1f} +25")
+        elif rsi > 62 and signal_type == "SELL": score += 25; reason.append(f"RSI Overbought {rsi:.1f} +25")
 
-        if stoch < 20 and stoch > stoch_signal and signal_type == "BUY":
-            score += 20
-            reason.append(f"Stoch Cross +20")
-        elif stoch > 80 and stoch < stoch_signal and signal_type == "SELL":
-            score += 20
-            reason.append(f"Stoch Cross +20")
+        if stoch < 25 and stoch > stoch_signal and signal_type == "BUY": score += 20; reason.append(f"Stoch Cross +20")
+        elif stoch > 75 and stoch < stoch_signal and signal_type == "SELL": score += 20; reason.append(f"Stoch Cross +20")
 
-        if vol_strong:
-            score += 15
-            reason.append(f"Vol {vol_ratio:.1f}x (STRONG)")
-        else:
-            reason.append(f"Vol {vol_ratio:.1f}x (Normal)")
-
-        confidence = min(95, score + 10)
-        return score, confidence, signal_type, reason, vol_strong
+        # 40% FIX - Volume ko hata diya block se, sirf info ke liye rakha
+        confidence = min(95, score + 20)
+        return score, confidence, signal_type, reason
     except Exception as e:
-        return 0, 0, None, [], False
+        print(f"Score error {e}")
+        return 0, 0, None, []
 
 def get_data(symbol="EURUSD=X"):
     try:
-        df = yf.download(symbol, period="1d", interval="1m", progress=False)
-        if df.empty:
-            return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        df = yf.download(symbol, period="1d", interval="1m", progress=False, auto_adjust=True)
+        if df.empty: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         return df
-    except:
-        return None
+    except: return None
 
-# --- SCANNER ---
+def check_win_loss(chat_id, pair, signal_type, entry_price):
+    # WIN/LOSS RESULT SYSTEM
+    time.sleep(65) # Next candle close ka wait
+    try:
+        clean_pair = pair.replace(" (OTC)", "").replace("/", "")
+        yahoo_symbol = f"{clean_pair}=X"
+        df = get_data(yahoo_symbol)
+        if df is None: return
+        close_price = df['Close'].iloc[-1]
+
+        win = (signal_type == "BUY" and close_price > entry_price) or (signal_type == "SELL" and close_price < entry_price)
+        result_msg = f"{'✅ WIN 🟢' if win else '❌ LOSS 🔴'}\n\nPair: {pair}\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}"
+        bot.send_message(chat_id, result_msg)
+    except Exception as e:
+        print(f"Result error {e}")
+
+# --- FAST SCANNER - 20 SEC PRE-ENTRY ---
 def scanner_loop(chat_id):
     global bot_active
+    print("Fast Scanner Started - 5 sec loop")
     while bot_active:
         try:
-            for pair in selected_pairs:
-                if not bot_active:
-                    break
+            now_sec = datetime.datetime.now().second
+            # 20-sec Pre-Entry System: Only 40-59 sec me signal dega
+            if now_sec < 40:
+                time.sleep(1)
+                continue
+
+            for pair in selected_pairs[:]: # Double pair bug fix - copy
+                if not bot_active: break
+
+                # Double pair bug fix - same pair ko 2 min tak repeat mat karo
+                if pair in LAST_SIGNAL and time.time() - LAST_SIGNAL[pair] < 120:
+                    continue
+
                 clean_pair = pair.replace(" (OTC)", "").replace("/", "")
                 yahoo_symbol = f"{clean_pair}=X"
                 df = get_data(yahoo_symbol)
-                if df is None or len(df) < 30:
-                    continue
+                if df is None or len(df) < 30: continue
 
-                score, conf, sig_type, reasons, vol_strong = calculate_score(df)
-                print(f"Scanning {pair}... Score {score} vs Filter {SCORE_THRESHOLD}")
+                score, conf, sig_type, reasons = calculate_score(df)
+                print(f"Scanning {pair}... Score {score}")
 
                 if sig_type and score >= SCORE_THRESHOLD:
-                    if FAKE_FILTER and not vol_strong and score < 70:
-                        continue
+                    LAST_SIGNAL[pair] = time.time()
+                    entry_price = df['Close'].iloc[-1]
 
                     msg = (
                         f"🔥 **{pair} {sig_type} SIGNAL** 🔥\n\n"
-                        f"📊 **Score: {score} | Confidence: {conf}%**\n"
-                        f"⏱️ TF: {timeframe} | Filter: {SCORE_THRESHOLD}%+\n"
+                        f"📊 Score: {score} | Conf: {conf}%\n"
+                        f"⏱️ Entry in next 15-20 sec\n"
                         f"-------------------------\n"
                         + "\n".join([f"• {r}" for r in reasons]) +
                         f"\n-------------------------\n"
-                        f"⏰ Time: {time.strftime('%H:%M:%S')}"
+                        f"⏰ {time.strftime('%H:%M:%S')} | Filter {SCORE_THRESHOLD}%"
                     )
-                    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=get_main_keyboard())
-            time.sleep(60)
+                    bot.send_message(chat_id, msg, parse_mode="Markdown")
+                    # WIN/LOSS thread start
+                    threading.Thread(target=check_win_loss, args=(chat_id, pair, sig_type, entry_price), daemon=True).start()
+
+            time.sleep(5) # FAST BOT - 5 sec only
         except Exception as e:
             print(f"Scanner error: {e}")
             time.sleep(5)
 
-# --- HANDLERS ---
+# --- HANDLERS with BOT LOCK ---
 @bot.message_handler(commands=['start'])
 def start_handler(message):
+    if OWNER_ID and message.chat.id!= OWNER_ID:
+        bot.send_message(message.chat.id, "🔒 Bot Locked. Unauthorized.")
+        return
     bot.send_message(
         message.chat.id,
         f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\n"
-        f"Market: OTC\n"
-        f"Pairs: {len(selected_pairs)} {', '.join(selected_pairs)}\n"
-        f"TF: {timeframe}\n"
-        f"Score Filter: {SCORE_THRESHOLD}%\n"
-        f"Fake Filter: {'ON' if FAKE_FILTER else 'OFF'}",
+        f"Pairs: {len(selected_pairs)} | {', '.join(selected_pairs)}\n"
+        f"TF: {timeframe} | Filter: {SCORE_THRESHOLD}%\n"
+        f"Total: 18 OTC + 7 LIVE = 25",
         reply_markup=get_main_keyboard()
     )
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     global bot_active, timeframe, selected_pairs, SCORE_THRESHOLD
+    if OWNER_ID and call.message.chat.id!= OWNER_ID:
+        bot.answer_callback_query(call.id, "🔒 Locked")
+        return
+
     chat_id = call.message.chat.id
     data = call.data
 
     if data == "start_bot":
         if not bot_active:
             bot_active = True
-            bot.send_message(chat_id, f"✅ Bot Started with Score {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"✅ Fast Bot Started | Filter {SCORE_THRESHOLD}% | 20s Entry", reply_markup=get_main_keyboard())
             threading.Thread(target=scanner_loop, args=(chat_id,), daemon=True).start()
 
     elif data == "stop_bot":
@@ -215,84 +223,36 @@ def callback_handler(call):
         bot.send_message(chat_id, "🔴 Bot Stopped", reply_markup=get_main_keyboard())
 
     elif data == "select_market":
-        bot.send_message(chat_id, "Select Market:", reply_markup=get_market_keyboard())
+        bot.edit_message_text("Select Market (25 Pairs):", chat_id, call.message.message_id, reply_markup=get_market_keyboard())
 
     elif data.startswith("pair_"):
         pair_name = data.replace("pair_", "")
-        if pair_name in selected_pairs:
-            selected_pairs.remove(pair_name)
-        else:
-            selected_pairs.append(pair_name)
-            if len(selected_pairs) > 2:
-                selected_pairs = selected_pairs[-2:]
-        bot.send_message(
-            chat_id,
-            f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\n"
-            f"Market: OTC\n"
-            f"Pairs: {len(selected_pairs)} {', '.join(selected_pairs)}\n"
-            f"TF: {timeframe}\n"
-            f"Score Filter: {SCORE_THRESHOLD}%\n"
-            f"Fake Filter: {'ON' if FAKE_FILTER else 'OFF'}",
-            reply_markup=get_main_keyboard()
-        )
+        # Double pair bug fix - set use kar rahe
+        s = set(selected_pairs)
+        if pair_name in s: s.remove(pair_name)
+        else: s.add(pair_name)
+        selected_pairs = list(s)
+        bot.edit_message_text(f"Selected: {len(selected_pairs)} pairs", chat_id, call.message.message_id, reply_markup=get_market_keyboard())
 
     elif data == "timeframe":
-        bot.send_message(chat_id, "Select Timeframe:", reply_markup=get_timeframe_keyboard())
+        bot.edit_message_text("Select Timeframe:", chat_id, call.message.message_id, reply_markup=get_timeframe_keyboard())
 
     elif data.startswith("tf_"):
         timeframe = data.replace("tf_", "")
         bot.send_message(chat_id, f"⏱️ TF: {timeframe} set", reply_markup=get_main_keyboard())
 
     elif data == "score_menu":
-        bot.send_message(
-            chat_id,
-            f"🎯 **Current Score Filter: {SCORE_THRESHOLD}%**\n\n"
-f"40% = Sab signals (testing)\n"
-f"50% = Low filter\n"
-f"60% = Medium\n"
-f"65% = Good\n"
-f"70% = Strong (Recommended)\n"
-f"80% = Very Strong\n"
-f"90% = Only super strong\n"
-f"99% = Only super strong",
-            parse_mode="Markdown",
-            reply_markup=get_score_keyboard()
-        )
+        bot.edit_message_text(f"🎯 Current: {SCORE_THRESHOLD}%\n40% = All signals", chat_id, call.message.message_id, reply_markup=get_score_keyboard())
 
     elif data.startswith("score_"):
-        new_score = int(data.split("_")[1])
-        SCORE_THRESHOLD = new_score
-        bot.send_message(
-            chat_id,
-            f"✅ **Score Filter set: {SCORE_THRESHOLD}%**\n"
-            f"Ab sirf {SCORE_THRESHOLD}%+ wale hi ayenge.",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
+        SCORE_THRESHOLD = int(data.split("_")[1])
+        bot.send_message(chat_id, f"✅ Filter: {SCORE_THRESHOLD}% set. Ab 40% bhi work karega.", reply_markup=get_main_keyboard())
 
     elif data == "status":
-        bot.send_message(
-            chat_id,
-            f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\n"
-            f"Market: OTC\n"
-            f"Pairs: {len(selected_pairs)} {', '.join(selected_pairs)}\n"
-            f"TF: {timeframe}\n"
-            f"Score Filter: {SCORE_THRESHOLD}%\n"
-            f"Fake Filter: {'ON' if FAKE_FILTER else 'OFF'}",
-            reply_markup=get_main_keyboard()
-        )
+        bot.send_message(chat_id, f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\nPairs: {selected_pairs}\nFilter: {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
 
     elif data == "back_main":
-        bot.send_message(
-            chat_id,
-            f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\n"
-            f"Market: OTC\n"
-            f"Pairs: {len(selected_pairs)} {', '.join(selected_pairs)}\n"
-            f"TF: {timeframe}\n"
-            f"Score Filter: {SCORE_THRESHOLD}%\n"
-            f"Fake Filter: {'ON' if FAKE_FILTER else 'OFF'}",
-            reply_markup=get_main_keyboard()
-        )
+        bot.edit_message_text(f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%", chat_id, call.message.message_id, reply_markup=get_main_keyboard())
 
-print("Sam.ai bot running...")
+print("Bot running with 25 pairs, fast 5s loop, 20s entry, WIN/LOSS, Lock...")
 bot.infinity_polling()
