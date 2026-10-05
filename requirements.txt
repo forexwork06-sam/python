@@ -1,11 +1,7 @@
-setuptools
-pyTelegramBotAPI
+python-telegram-bot==20.7
 pandas
-ta
-pytz
-yfinance
-git+https://github.com/ChipaDevTeam/QuotexAPI.git
 requests
 aiohttp
 websocket-client
+setuptools
 git+https://github.com/cleitonleonel/pyquotex.git
