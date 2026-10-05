@@ -6,4 +6,3 @@ pytz==2024.1
 yfinance==0.2.40
 aiohttp==3.9.5
 requests==2.32.3
-https://github.com/nordin-j/pyquotex/archive/main.zip
