@@ -12,6 +12,16 @@ print(f"Owners loaded: {OWNER_IDS}")
 
 QUOTEX_EMAIL = os.getenv("QUOTEX_EMAIL")
 QUOTEX_PASSWORD = os.getenv("QUOTEX_PASSWORD")
+PROXY_URL = os.getenv("PROXY_URL") # <-- NAYA PROXY
+
+# Proxy ko system me set karo
+if PROXY_URL:
+    os.environ["HTTP_PROXY"] = PROXY_URL
+    os.environ["HTTPS_PROXY"] = PROXY_URL
+    os.environ["http_proxy"] = PROXY_URL
+    os.environ["https_proxy"] = PROXY_URL
+    print(f"Proxy Loaded: {PROXY_URL[:20]}...")
+
 USE_QUOTEX = False
 q_client = None
 
@@ -185,8 +195,15 @@ def scanner_loop(chat_id):
             if not QUOTEX_EMAIL or not QUOTEX_PASSWORD:
                 bot.send_message(chat_id, "❌ QUOTEX_EMAIL / PASSWORD env var missing in Railway!")
                 bot_active=False; return
-            q_client = Quotex(email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD)
-            print("Connecting Quotex...")
+            print("Connecting Quotex with Proxy..." if PROXY_URL else "Connecting Quotex...")
+            # Proxy support with fallback
+            try:
+                if PROXY_URL:
+                    q_client = Quotex(email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD, proxies={"http": PROXY_URL, "https": PROXY_URL})
+                else:
+                    q_client = Quotex(email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD)
+            except TypeError:
+                q_client = Quotex(email=QUOTEX_EMAIL, password=QUOTEX_PASSWORD)
             check, reason = loop.run_until_complete(q_client.connect())
             print(f"Quotex Connect: {check} {reason}")
             if not check:
@@ -241,14 +258,14 @@ def scanner_loop(chat_id):
 def start_handler(message):
     if message.chat.id not in OWNER_IDS: bot.send_message(message.chat.id, "Bot Locked."); return
     mode = "QUOTEX OTC" if USE_QUOTEX else "YFINANCE REAL"
-    bot.send_message(message.chat.id, f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\n\nCommands:\n/quotex - Quotex Mode\n/yfinance - YFinance Mode", reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\nProxy: {'✅ ON' if PROXY_URL else '❌ OFF'}\n\nCommands:\n/quotex - Quotex Mode\n/yfinance - YFinance Mode", reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['quotex'])
 def quotex_handler(message):
     global USE_QUOTEX
     if message.chat.id not in OWNER_IDS: return
     USE_QUOTEX = True
-    bot.send_message(message.chat.id, "✅ Switched to QUOTEX OTC MODE", reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, f"✅ Switched to QUOTEX OTC MODE | Proxy: {'ON' if PROXY_URL else 'OFF'}", reply_markup=get_main_keyboard())
 
 @bot.message_handler(commands=['yfinance'])
 def yfinance_handler(message):
@@ -265,7 +282,7 @@ def callback_handler(call):
     if data=="start_bot":
         if not bot_active:
             bot_active=True
-            bot.send_message(chat_id, f"🚀 Bot Started | Filter {SCORE_THRESHOLD}% | Mode: {'QUOTEX' if USE_QUOTEX else 'YFINANCE'} | Pairs: {len(selected_pairs)}", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"🚀 Bot Started | Filter {SCORE_THRESHOLD}% | Mode: {'QUOTEX' if USE_QUOTEX else 'YFINANCE'} | Proxy: {'ON' if PROXY_URL else 'OFF'} | Pairs: {len(selected_pairs)}", reply_markup=get_main_keyboard())
             threading.Thread(target=scanner_loop, args=(chat_id,), daemon=True).start()
     elif data=="stop_bot":
         bot_active=False; bot.send_message(chat_id, "⏹️ Bot Stopped", reply_markup=get_main_keyboard())
@@ -296,7 +313,7 @@ def callback_handler(call):
     elif data=="status":
         pending=", ".join(PENDING_TRADES.keys()) if PENDING_TRADES else "None"
         mode = "QUOTEX" if USE_QUOTEX else "YFINANCE"
-        bot.send_message(chat_id, f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {selected_pairs}\nFilter: {SCORE_THRESHOLD}%\nPending: {pending}", reply_markup=get_main_keyboard())
+        bot.send_message(chat_id, f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {selected_pairs}\nFilter: {SCORE_THRESHOLD}%\nProxy: {'ON - '+PROXY_URL[:25] if PROXY_URL else 'OFF'}\nPending: {pending}", reply_markup=get_main_keyboard())
     elif data=="back_main":
         bot.edit_message_text(f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%", chat_id, call.message.message_id, reply_markup=get_main_keyboard())
     elif data=="mode_quotex":
