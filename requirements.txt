@@ -1,6 +1,7 @@
-pyTelegramBotAPI==4.14.0
-pandas==2.0.3
-ta==0.10.2
+setuptools
+pyTelegramBotAPI
+pandas
+ta
 pytz
 yfinance
 quotexapi
