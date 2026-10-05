@@ -8,3 +8,4 @@ git+https://github.com/ChipaDevTeam/QuotexAPI.git
 requests
 aiohttp
 websocket-client
+git+https://github.com/cleitonleonel/pyquotex.git
