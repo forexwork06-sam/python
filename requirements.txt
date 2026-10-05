@@ -4,7 +4,7 @@ pandas
 ta
 pytz
 yfinance
+quotexapi
 requests
 aiohttp
 websocket-client
-git+https://github.com/cleiton1755/quotexapi.git
