@@ -3,4 +3,5 @@ yfinance
 pandas
 ta
 pytz
-quotexapi
+requests
+git+https://github.com/cleitonleonel/pyquotex.git
