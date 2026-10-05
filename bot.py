@@ -27,15 +27,7 @@ except Exception as e:
 IST = pytz.timezone('Asia/Kolkata')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
-ALL_PAIRS = [
-    "EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","USD/CAD","NZD/USD",
-    "EUR/GBP","EUR/JPY","GBP/JPY","EUR/AUD","CAD/JPY","CHF/JPY","AUD/JPY",
-    "AUD/CAD","AUD/CHF","AUD/NZD","CAD/CHF","EUR/CAD","EUR/CHF","EUR/NZD",
-    "GBP/AUD","GBP/CAD","GBP/CHF","GBP/NZD",
-    "USD/INR","USD/TRY","USD/BRL",
-    "EUR/USD (OTC)","GBP/USD (OTC)","USD/JPY (OTC)","USD/CAD (OTC)",
-    "AUD/USD (OTC)","EUR/GBP (OTC)","USD/INR (OTC)"
-]
+ALL_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","USD/CAD","NZD/USD","EUR/GBP","EUR/JPY","GBP/JPY","EUR/AUD","CAD/JPY","CHF/JPY","AUD/JPY","AUD/CAD","AUD/CHF","AUD/NZD","CAD/CHF","EUR/CAD","EUR/CHF","EUR/NZD","GBP/AUD","GBP/CAD","GBP/CHF","GBP/NZD","USD/INR","USD/TRY","USD/BRL","EUR/USD (OTC)","GBP/USD (OTC)","USD/JPY (OTC)","USD/CAD (OTC)","AUD/USD (OTC)","EUR/GBP (OTC)","USD/INR (OTC)"]
 selected_pairs = ALL_PAIRS.copy()
 bot_active=False
 SCORE_THRESHOLD=65
@@ -66,8 +58,9 @@ def get_main_keyboard():
 
 def get_score_keyboard():
     markup=InlineKeyboardMarkup(row_width=3)
-    markup.add(InlineKeyboardButton("40% (All)",callback_data="score_40"),InlineKeyboardButton("50%",callback_data="score_50"),InlineKeyboardButton("60%",callback_data="score_60"))
-    markup.add(InlineKeyboardButton("65% (REAL Best)",callback_data="score_65"),InlineKeyboardButton("70% (OTC Best)",callback_data="score_70"),InlineKeyboardButton("80%",callback_data="score_80"))
+    markup.add(InlineKeyboardButton("20% (TEST)",callback_data="score_20"),InlineKeyboardButton("40% (All)",callback_data="score_40"),InlineKeyboardButton("50%",callback_data="score_50"))
+    markup.add(InlineKeyboardButton("60%",callback_data="score_60"),InlineKeyboardButton("65% (REAL Best)",callback_data="score_65"),InlineKeyboardButton("70% (OTC Best)",callback_data="score_70"))
+    markup.add(InlineKeyboardButton("80%",callback_data="score_80"))
     markup.add(InlineKeyboardButton("Back",callback_data="back_main"))
     return markup
 
@@ -131,8 +124,7 @@ def calculate_score_6factor(df):
                 if score>best_score: best_score=score; best_type="SELL"; best_reason=reason
         if best_type is None: return 0,0,None,[]
         return best_score,min(95,best_score),best_type,best_reason
-    except:
-        return 0,0,None,[]
+    except: return 0,0,None,[]
 
 def get_data_yf(symbol="EURUSD=X"):
     try:
@@ -181,16 +173,14 @@ def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist,use_q):
         win=(signal_type=="BUY" and close_price>entry_price) or (signal_type=="SELL" and close_price<entry_price)
         now_ist=datetime.datetime.now(IST).strftime('%I:%M:%S %p IST')
         reset_daily_if_needed()
-        if win:
-            result_msg=f"✅ WIN - {pair}\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}\n{now_ist}"
+        if win: result_msg=f"✅ WIN - {pair}\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}\n{now_ist}"
         else:
             LOSS_COUNT[pair]+=1
             if LOSS_COUNT[pair]>=2:
                 DISABLED_TODAY.add(pair)
                 if pair in selected_pairs: selected_pairs.remove(pair)
                 result_msg=f"❌ LOSS - {pair} [{LOSS_COUNT[pair]}/2]\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}\n⚠️ {pair} Disabled for Today (2 Loss) 🚫\n{now_ist}"
-            else:
-                result_msg=f"❌ LOSS - {pair} [{LOSS_COUNT[pair]}/2]\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}\n{now_ist}"
+            else: result_msg=f"❌ LOSS - {pair} [{LOSS_COUNT[pair]}/2]\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}\n{now_ist}"
         bot.send_message(chat_id,result_msg)
         if pair in PENDING_TRADES: del PENDING_TRADES[pair]
     except:
@@ -224,9 +214,14 @@ def scanner_loop(chat_id):
         try:
             reset_daily_if_needed()
             now_ist=datetime.datetime.now(IST)
-            if now_ist.second<35 or now_ist.second>58: time.sleep(1); continue
+            # 30 SEC PEHLE SIGNAL - 25 to 35 sec window
+            if now_ist.second<25 or now_ist.second>35:
+                time.sleep(1)
+                continue
             next_entry_time=(now_ist+datetime.timedelta(minutes=1)).replace(second=0,microsecond=0)
-            if next_entry_time.minute==last_min: time.sleep(1); continue
+            if next_entry_time.minute==last_min:
+                time.sleep(1)
+                continue
             last_min=next_entry_time.minute
             for pair in selected_pairs[:]:
                 if not bot_active: break
@@ -300,7 +295,7 @@ def callback_handler(call):
     elif data.startswith("tf_"): bot.send_message(chat_id,f"TF set",reply_markup=get_main_keyboard())
     elif data=="score_menu": bot.edit_message_text(f"Current: {SCORE_THRESHOLD}%",chat_id,call.message.message_id,reply_markup=get_score_keyboard())
     elif data.startswith("score_"):
-        SCORE_THRESHOLD=int(data.split("_")[1]); bot.send_message(chat_id,f"Filter: {SCORE_THRESHOLD}% set.",reply_markup=get_main_keyboard())
+        SCORE_THRESHOLD=int(data.split("_")[1]); bot.send_message(chat_id,f"Filter: {SCORE_THRESHOLD}% set. | Mode: TEST (20%)" if SCORE_THRESHOLD==20 else f"Filter: {SCORE_THRESHOLD}% set.",reply_markup=get_main_keyboard())
     elif data=="status":
         pending=", ".join(PENDING_TRADES.keys()) if PENDING_TRADES else "None"
         disabled=", ".join(DISABLED_TODAY) if DISABLED_TODAY else "None"
@@ -309,16 +304,30 @@ def callback_handler(call):
         bot.send_message(chat_id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%\nPending: {pending}\nLoss Count:\n{loss_detail}\nDisabled Today: {disabled}",reply_markup=get_main_keyboard())
     elif data=="back_main": bot.edit_message_text(f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%",chat_id,call.message.message_id,reply_markup=get_main_keyboard())
     elif data=="mode_quotex":
-        if Quotex is None:
-            bot.send_message(chat_id,"❌ Quotex lib not installed, YFINANCE hi use karo",reply_markup=get_main_keyboard())
-        else:
-            USE_QUOTEX=True; bot.send_message(chat_id,"✅ QUOTEX mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
+        if Quotex is None: bot.send_message(chat_id,"❌ Quotex lib not installed, YFINANCE hi use karo",reply_markup=get_main_keyboard())
+        else: USE_QUOTEX=True; bot.send_message(chat_id,"✅ QUOTEX mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
     elif data=="mode_yfinance": USE_QUOTEX=False; bot.send_message(chat_id,"✅ YFINANCE mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
 
-print("Bot running FINAL FIXED...")
-bot.delete_webhook(drop_pending_updates=True); time.sleep(2)
+print("Bot running FINAL FIXED V3 - 20% TEST + 30sec Early + 409 Patch...")
+try:
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.delete_webhook(drop_pending_updates=True)
+    time.sleep(2)
+except Exception as e:
+    print(f"Webhook clear: {e}")
+    time.sleep(2)
+
 while True:
-    try: bot.infinity_polling(skip_pending=True,timeout=60,long_polling_timeout=60)
+    try:
+        print("Starting polling...")
+        bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
     except Exception as e:
-        print(f"Polling error {e}")
-        time.sleep(5)
+        err=str(e)
+        print(f"Polling error {err}")
+        if "409" in err or "Conflict" in err:
+            print("409 Conflict detected - clearing webhook and waiting 15s...")
+            try: bot.delete_webhook(drop_pending_updates=True)
+            except: pass
+            time.sleep(15)
+        else: time.sleep(5)
