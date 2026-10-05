@@ -1,8 +1,6 @@
-pyTelegramBotAPI==4.14.0
-pandas==2.1.4
-numpy==1.26.4
-ta==0.10.2
-pytz==2024.1
-yfinance==0.2.40
-aiohttp==3.9.5
-requests==2.32.3
+pyTelegramBotAPI
+pandas
+ta
+yfinance
+curl_cffi
+pytz
