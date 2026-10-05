@@ -5,3 +5,5 @@ ta
 pytz
 requests
 git+https://github.com/cleitonleonel/pyquotex.git
+pysocks
+python-socks[asyncio]
