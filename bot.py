@@ -255,4 +255,6 @@ def callback_handler(call):
         bot.edit_message_text(f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%", chat_id, call.message.message_id, reply_markup=get_main_keyboard())
 
 print("Bot running with 25 pairs, fast 5s loop, 20s entry, WIN/LOSS, Lock...")
-bot.infinity_polling()
+bot.remove_webhook()
+time.sleep(3)
+bot.infinity_polling(skip_pending=True, none_stop=True, timeout=60)
