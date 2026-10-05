@@ -231,7 +231,7 @@ def start_handler(message):
        if message.chat.id not in OWNER_IDS:
         bot.send_message(message.chat.id, "Bot Locked.")
         return
-    bot.send_message(message.chat.id, f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nTF: {timeframe} | Filter: {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nTF: {timeframe} | Filter: {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
