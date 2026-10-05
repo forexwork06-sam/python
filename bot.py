@@ -9,27 +9,23 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_RAW = os.getenv("OWNER_ID") or os.getenv("CHAT_ID") or ""
 OWNER_IDS = [int(x) for x in OWNER_RAW.replace(" ", "").split(",") if x.lstrip('-').isdigit()]
 
+if not BOT_TOKEN:
+    print("CRITICAL: BOT_TOKEN missing!")
+    time.sleep(3)
+    exit(0)
+
 QUOTEX_EMAIL = os.getenv("QUOTEX_EMAIL")
 QUOTEX_PASSWORD = os.getenv("QUOTEX_PASSWORD")
-PROXY_URL = os.getenv("PROXY_URL") or os.getenv("HTTP_PROXY") or ""
-
-if PROXY_URL and not PROXY_URL.startswith("http"):
-    PROXY_URL = "http://" + PROXY_URL
-if PROXY_URL:
-    os.environ["HTTP_PROXY"] = PROXY_URL
-    os.environ["HTTPS_PROXY"] = PROXY_URL
-    os.environ["http_proxy"] = PROXY_URL
-    os.environ["https_proxy"] = PROXY_URL
 
 try:
     try: from quotexapi.stable_api import Quotex
     except: from pyquotex.stable_api import Quotex
 except Exception as e:
-    print(f"Quotex lib missing {e}")
+    print(f"Quotex lib missing {e} - YFINANCE only")
     Quotex = None
 
 IST = pytz.timezone('Asia/Kolkata')
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
 ALL_PAIRS = [
     "EUR/USD","GBP/USD","USD/JPY","USD/CHF","AUD/USD","USD/CAD","NZD/USD",
@@ -48,7 +44,7 @@ PENDING_TRADES={}
 LOSS_COUNT=defaultdict(int)
 DISABLED_TODAY=set()
 CURRENT_DAY=datetime.datetime.now(IST).date()
-USE_QUOTEX=True
+USE_QUOTEX=False
 q_client=None
 
 def reset_daily_if_needed():
@@ -202,16 +198,7 @@ def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist,use_q):
 
 def create_quotex_client():
     if Quotex is None: return None
-    if not PROXY_URL:
-        return Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD)
-    try:
-        return Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD,proxies={"http":PROXY_URL,"https":PROXY_URL})
-    except TypeError:
-        try: return Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD,proxy=PROXY_URL)
-        except:
-            c=Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD)
-            if hasattr(c,'proxies'): c.proxies={"http":PROXY_URL,"https":PROXY_URL}
-            return c
+    return Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD)
 
 def scanner_loop(chat_id):
     global bot_active,q_client,USE_QUOTEX
@@ -220,18 +207,19 @@ def scanner_loop(chat_id):
     if USE_QUOTEX:
         try:
             if not QUOTEX_EMAIL or not QUOTEX_PASSWORD:
-                bot.send_message(chat_id,"❌ QUOTEX_EMAIL/PASSWORD missing!")
-                bot_active=False; return
-            q_client=create_quotex_client()
-            bot.send_message(chat_id,f"🔄 Connecting Quotex... Proxy: {'ON' if PROXY_URL else 'OFF'}")
-            check,reason=loop.run_until_complete(q_client.connect())
-            if not check:
-                bot.send_message(chat_id,f"❌ Quotex Login Fail: {reason}\nTip: 403 = Proxy kharab hai, residential proxy lagao.",reply_markup=get_main_keyboard())
-                bot_active=False; return
-            time.sleep(2)
+                bot.send_message(chat_id,"❌ QUOTEX_EMAIL/PASSWORD missing! YFINANCE use karo")
+                USE_QUOTEX=False
+            else:
+                q_client=create_quotex_client()
+                bot.send_message(chat_id,f"🔄 Connecting Quotex...")
+                check,reason=loop.run_until_complete(q_client.connect())
+                if not check:
+                    bot.send_message(chat_id,f"❌ Quotex Fail: {reason}\nYFINANCE pe switch ho raha hu",reply_markup=get_main_keyboard())
+                    USE_QUOTEX=False
+                time.sleep(2)
         except Exception as e:
-            bot.send_message(chat_id,f"❌ Connect Error: {e}\nProxy check karo.",reply_markup=get_main_keyboard())
-            bot_active=False; return
+            bot.send_message(chat_id,f"❌ Connect Error: {e}\nYFINANCE mode",reply_markup=get_main_keyboard())
+            USE_QUOTEX=False
     while bot_active:
         try:
             reset_daily_if_needed()
@@ -266,7 +254,9 @@ def scanner_loop(chat_id):
                     bot.send_message(chat_id,msg)
                     threading.Thread(target=check_win_loss,args=(chat_id,pair,sig_type,entry_price,entry_time_str,is_q),daemon=True).start()
             time.sleep(1)
-        except: time.sleep(1)
+        except Exception as e:
+            print(f"Loop error {e}")
+            time.sleep(1)
     loop.close()
 
 @bot.message_handler(commands=['start'])
@@ -274,19 +264,7 @@ def start_handler(message):
     if message.chat.id not in OWNER_IDS: bot.send_message(message.chat.id,"Bot Locked."); return
     mode="QUOTEX OTC" if USE_QUOTEX else "YFINANCE REAL"
     disabled=", ".join(DISABLED_TODAY) if DISABLED_TODAY else "None"
-    bot.send_message(message.chat.id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\nProxy: {'✅ ON' if PROXY_URL else '❌ OFF'}\nDisabled Today (2 Loss): {disabled}",reply_markup=get_main_keyboard())
-
-@bot.message_handler(commands=['quotex'])
-def quotex_handler(message):
-    global USE_QUOTEX
-    if message.chat.id not in OWNER_IDS: return
-    USE_QUOTEX=True; bot.send_message(message.chat.id,f"✅ QUOTEX MODE | Proxy: {'ON' if PROXY_URL else 'OFF'}",reply_markup=get_main_keyboard())
-
-@bot.message_handler(commands=['yfinance'])
-def yfinance_handler(message):
-    global USE_QUOTEX
-    if message.chat.id not in OWNER_IDS: return
-    USE_QUOTEX=False; bot.send_message(message.chat.id,"✅ YFINANCE MODE",reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\nDisabled Today (2 Loss): {disabled}",reply_markup=get_main_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -296,7 +274,7 @@ def callback_handler(call):
     if data=="start_bot":
         if not bot_active:
             bot_active=True
-            bot.send_message(chat_id,f"🚀 Started | Filter {SCORE_THRESHOLD}% | Mode: {'QUOTEX' if USE_QUOTEX else 'YFINANCE'} | Proxy: {'ON' if PROXY_URL else 'OFF'} | Pairs: {len(selected_pairs)}",reply_markup=get_main_keyboard())
+            bot.send_message(chat_id,f"🚀 Started | Filter {SCORE_THRESHOLD}% | Mode: {'QUOTEX' if USE_QUOTEX else 'YFINANCE'} | Pairs: {len(selected_pairs)}",reply_markup=get_main_keyboard())
             threading.Thread(target=scanner_loop,args=(chat_id,),daemon=True).start()
     elif data=="stop_bot": bot_active=False; bot.send_message(chat_id,"⏹️ Stopped",reply_markup=get_main_keyboard())
     elif data=="select_market": bot.edit_message_text(f"Select Market ({len(ALL_PAIRS)} Pairs):",chat_id,call.message.message_id,reply_markup=get_market_keyboard())
@@ -328,13 +306,19 @@ def callback_handler(call):
         disabled=", ".join(DISABLED_TODAY) if DISABLED_TODAY else "None"
         loss_detail="\n".join([f"{k}:{v}/2" for k,v in LOSS_COUNT.items() if v>0]) or "No losses today"
         mode="QUOTEX" if USE_QUOTEX else "YFINANCE"
-        bot.send_message(chat_id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%\nProxy: {'ON' if PROXY_URL else 'OFF'}\nPending: {pending}\nLoss Count:\n{loss_detail}\nDisabled Today: {disabled}",reply_markup=get_main_keyboard())
+        bot.send_message(chat_id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%\nPending: {pending}\nLoss Count:\n{loss_detail}\nDisabled Today: {disabled}",reply_markup=get_main_keyboard())
     elif data=="back_main": bot.edit_message_text(f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%",chat_id,call.message.message_id,reply_markup=get_main_keyboard())
-    elif data=="mode_quotex": USE_QUOTEX=True; bot.send_message(chat_id,"✅ QUOTEX mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
+    elif data=="mode_quotex":
+        if Quotex is None:
+            bot.send_message(chat_id,"❌ Quotex lib not installed, YFINANCE hi use karo",reply_markup=get_main_keyboard())
+        else:
+            USE_QUOTEX=True; bot.send_message(chat_id,"✅ QUOTEX mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
     elif data=="mode_yfinance": USE_QUOTEX=False; bot.send_message(chat_id,"✅ YFINANCE mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
 
-print("Bot running FINAL V3 - Pure Quotex...")
+print("Bot running FINAL FIXED...")
 bot.delete_webhook(drop_pending_updates=True); time.sleep(2)
 while True:
     try: bot.infinity_polling(skip_pending=True,timeout=60,long_polling_timeout=60)
-    except: time.sleep(5)
+    except Exception as e:
+        print(f"Polling error {e}")
+        time.sleep(5)
