@@ -11,29 +11,27 @@ import datetime
 # --- CONFIG ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-OWNER_ID = int(CHAT_ID) if CHAT_ID and CHAT_ID.lstrip('-').isdigit() else None # BOT LOCK
+OWNER_ID = int(CHAT_ID) if CHAT_ID and CHAT_ID.lstrip('-').isdigit() else None
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # --- 18 OTC + 7 LIVE = 25 PAIRS ---
 ALL_PAIRS = [
-    # OTC 18
     "EUR/USD (OTC)", "GBP/USD (OTC)", "USD/JPY (OTC)", "AUD/USD (OTC)",
     "EUR/GBP (OTC)", "USD/CHF (OTC)", "EUR/JPY (OTC)", "GBP/JPY (OTC)",
     "AUD/JPY (OTC)", "EUR/AUD (OTC)", "USD/CAD (OTC)", "NZD/USD (OTC)",
     "EUR/CAD (OTC)", "GBP/AUD (OTC)", "AUD/CAD (OTC)", "GBP/CAD (OTC)",
     "EUR/NZD (OTC)", "GBP/NZD (OTC)",
-    # LIVE 7
     "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "EUR/JPY", "GBP/JPY"
 ]
 
 selected_pairs = ["EUR/USD (OTC)"]
 timeframe = "1m"
 bot_active = False
-SCORE_THRESHOLD = 40 # 40% FIX - DEFAULT 40
-LAST_SIGNAL = {} # Double pair bug fix
+SCORE_THRESHOLD = 40
+LAST_SIGNAL = {}
 
-# --- KEYBOARDS (Same) ---
+# --- KEYBOARDS ---
 def get_main_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -68,7 +66,6 @@ def get_score_keyboard():
 def get_market_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
     for pair in ALL_PAIRS:
-        # Double pair bug fix - check mark
         check = "✅ " if pair in selected_pairs else ""
         markup.add(InlineKeyboardButton(f"{check}{pair}", callback_data=f"pair_{pair}"))
     markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_main"))
@@ -107,7 +104,6 @@ def calculate_score(df):
         if stoch < 25 and stoch > stoch_signal and signal_type == "BUY": score += 20; reason.append(f"Stoch Cross +20")
         elif stoch > 75 and stoch < stoch_signal and signal_type == "SELL": score += 20; reason.append(f"Stoch Cross +20")
 
-        # 40% FIX - Volume ko hata diya block se, sirf info ke liye rakha
         confidence = min(95, score + 20)
         return score, confidence, signal_type, reason
     except Exception as e:
@@ -123,52 +119,62 @@ def get_data(symbol="EURUSD=X"):
     except: return None
 
 def check_win_loss(chat_id, pair, signal_type, entry_price):
-    # WIN/LOSS RESULT SYSTEM
-    time.sleep(65) # Next candle close ka wait
+    time.sleep(65)
     try:
         clean_pair = pair.replace(" (OTC)", "").replace("/", "")
         yahoo_symbol = f"{clean_pair}=X"
         df = get_data(yahoo_symbol)
         if df is None: return
         close_price = df['Close'].iloc[-1]
-
         win = (signal_type == "BUY" and close_price > entry_price) or (signal_type == "SELL" and close_price < entry_price)
         result_msg = f"{'✅ WIN 🟢' if win else '❌ LOSS 🔴'}\n\nPair: {pair}\nSignal: {signal_type}\nEntry: {entry_price:.5f}\nClose: {close_price:.5f}"
         bot.send_message(chat_id, result_msg)
     except Exception as e:
         print(f"Result error {e}")
 
-# --- FAST SCANNER - 20 SEC PRE-ENTRY ---
+# --- 40 SEC ANALYSIS + 20 SEC ENTRY ---
 def scanner_loop(chat_id):
     global bot_active
-    print("Fast Scanner Started - 5 sec loop")
+    print("Scanner Started - 40s Analysis, 20s Entry")
+    last_signal_minute = -1
     while bot_active:
         try:
-            now_sec = datetime.datetime.now().second
-            # 20-sec Pre-Entry System: Only 40-59 sec me signal dega
+            now = datetime.datetime.now()
+            now_sec = now.second
+            now_min = now.minute
+
             if now_sec < 40:
+                for pair in selected_pairs[:]:
+                    if not bot_active: break
+                    clean_pair = pair.replace(" (OTC)", "").replace("/", "")
+                    yahoo_symbol = f"{clean_pair}=X"
+                    df = get_data(yahoo_symbol)
+                    if df is None or len(df) < 30: continue
+                    calculate_score(df)
+                    print(f"Analyzing {pair}... sec {now_sec}")
+                time.sleep(2)
+                continue
+
+            if now_min == last_signal_minute:
                 time.sleep(1)
                 continue
 
-            for pair in selected_pairs[:]: # Double pair bug fix - copy
+            for pair in selected_pairs[:]:
                 if not bot_active: break
-
-                # Double pair bug fix - same pair ko 2 min tak repeat mat karo
                 if pair in LAST_SIGNAL and time.time() - LAST_SIGNAL[pair] < 120:
                     continue
-
                 clean_pair = pair.replace(" (OTC)", "").replace("/", "")
                 yahoo_symbol = f"{clean_pair}=X"
                 df = get_data(yahoo_symbol)
                 if df is None or len(df) < 30: continue
 
                 score, conf, sig_type, reasons = calculate_score(df)
-                print(f"Scanning {pair}... Score {score}")
+                print(f"Final Scan {pair}... Score {score} at {now_sec}s")
 
                 if sig_type and score >= SCORE_THRESHOLD:
                     LAST_SIGNAL[pair] = time.time()
+                    last_signal_minute = now_min
                     entry_price = df['Close'].iloc[-1]
-
                     msg = (
                         f"🔥 **{pair} {sig_type} SIGNAL** 🔥\n\n"
                         f"📊 Score: {score} | Conf: {conf}%\n"
@@ -179,15 +185,13 @@ def scanner_loop(chat_id):
                         f"⏰ {time.strftime('%H:%M:%S')} | Filter {SCORE_THRESHOLD}%"
                     )
                     bot.send_message(chat_id, msg, parse_mode="Markdown")
-                    # WIN/LOSS thread start
                     threading.Thread(target=check_win_loss, args=(chat_id, pair, sig_type, entry_price), daemon=True).start()
-
-            time.sleep(5) # FAST BOT - 5 sec only
+            time.sleep(1)
         except Exception as e:
             print(f"Scanner error: {e}")
-            time.sleep(5)
+            time.sleep(1)
 
-# --- HANDLERS with BOT LOCK ---
+# --- HANDLERS ---
 @bot.message_handler(commands=['start'])
 def start_handler(message):
     if OWNER_ID and message.chat.id!= OWNER_ID:
@@ -208,53 +212,44 @@ def callback_handler(call):
     if OWNER_ID and call.message.chat.id!= OWNER_ID:
         bot.answer_callback_query(call.id, "🔒 Locked")
         return
-
     chat_id = call.message.chat.id
     data = call.data
 
     if data == "start_bot":
         if not bot_active:
             bot_active = True
-            bot.send_message(chat_id, f"✅ Fast Bot Started | Filter {SCORE_THRESHOLD}% | 20s Entry", reply_markup=get_main_keyboard())
+            bot.send_message(chat_id, f"✅ Bot Started | 40s Analysis | Filter {SCORE_THRESHOLD}% | 20s Entry", reply_markup=get_main_keyboard())
             threading.Thread(target=scanner_loop, args=(chat_id,), daemon=True).start()
-
     elif data == "stop_bot":
         bot_active = False
         bot.send_message(chat_id, "🔴 Bot Stopped", reply_markup=get_main_keyboard())
-
     elif data == "select_market":
         bot.edit_message_text("Select Market (25 Pairs):", chat_id, call.message.message_id, reply_markup=get_market_keyboard())
-
     elif data.startswith("pair_"):
         pair_name = data.replace("pair_", "")
-        # Double pair bug fix - set use kar rahe
         s = set(selected_pairs)
         if pair_name in s: s.remove(pair_name)
         else: s.add(pair_name)
         selected_pairs = list(s)
         bot.edit_message_text(f"Selected: {len(selected_pairs)} pairs", chat_id, call.message.message_id, reply_markup=get_market_keyboard())
-
     elif data == "timeframe":
         bot.edit_message_text("Select Timeframe:", chat_id, call.message.message_id, reply_markup=get_timeframe_keyboard())
-
     elif data.startswith("tf_"):
         timeframe = data.replace("tf_", "")
         bot.send_message(chat_id, f"⏱️ TF: {timeframe} set", reply_markup=get_main_keyboard())
-
     elif data == "score_menu":
         bot.edit_message_text(f"🎯 Current: {SCORE_THRESHOLD}%\n40% = All signals", chat_id, call.message.message_id, reply_markup=get_score_keyboard())
-
     elif data.startswith("score_"):
         SCORE_THRESHOLD = int(data.split("_")[1])
-        bot.send_message(chat_id, f"✅ Filter: {SCORE_THRESHOLD}% set. Ab 40% bhi work karega.", reply_markup=get_main_keyboard())
-
+        bot.send_message(chat_id, f"✅ Filter: {SCORE_THRESHOLD}% set.", reply_markup=get_main_keyboard())
     elif data == "status":
         bot.send_message(chat_id, f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\nPairs: {selected_pairs}\nFilter: {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
-
     elif data == "back_main":
         bot.edit_message_text(f"Status: {'ACTIVE 🟢' if bot_active else 'STOPPED 🔴'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%", chat_id, call.message.message_id, reply_markup=get_main_keyboard())
 
-print("Bot running with 25 pairs, fast 5s loop, 20s entry, WIN/LOSS, Lock...")
-bot.remove_webhook()
-time.sleep(3)
+print("Bot running with 25 pairs, 40s analysis, 20s entry, WIN/LOSS, Lock...")
+try:
+    bot.remove_webhook()
+    time.sleep(1)
+except: pass
 bot.infinity_polling(skip_pending=True, none_stop=True, timeout=60)
