@@ -275,8 +275,12 @@ def callback_handler(call):
         bot.edit_message_text(f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%", chat_id, call.message.message_id, reply_markup=get_main_keyboard())
 
 print("Bot running...")
-try:
-    bot.remove_webhook()
-    time.sleep(1)
-except: pass
-bot.infinity_polling(skip_pending=True)
+import time
+bot.delete_webhook(drop_pending_updates=True)
+time.sleep(2)
+while True:
+    try:
+        bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+    except Exception as e:
+        print(f"Polling error: {e}, restarting in 5 sec...")
+        time.sleep(5)
