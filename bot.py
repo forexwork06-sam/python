@@ -4,6 +4,8 @@ import time, threading, os, datetime, pytz
 import pandas as pd
 import ta
 from collections import defaultdict
+from curl_cffi import requests as c_requests
+import yfinance as yf
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_RAW = os.getenv("OWNER_ID") or os.getenv("CHAT_ID") or ""
@@ -26,6 +28,7 @@ PENDING_TRADES={}
 LOSS_COUNT=defaultdict(int)
 DISABLED_TODAY=set()
 CURRENT_DAY=datetime.datetime.now(IST).date()
+YF_SESSION = c_requests.Session(impersonate="chrome110")
 
 def reset_daily_if_needed():
     global CURRENT_DAY, LOSS_COUNT, DISABLED_TODAY
@@ -115,14 +118,15 @@ def calculate_score_6factor(df):
 
 def get_data_yf(symbol="EURUSD=X"):
     try:
-        import yfinance as yf
-        df=yf.download(symbol,period="1d",interval="1m",progress=False,auto_adjust=True)
+        df=yf.download(symbol,period="1d",interval="1m",progress=False,auto_adjust=True, session=YF_SESSION)
         if df.empty: return None
         if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
         if df.index.tz is None: df.index=df.index.tz_localize('UTC').tz_convert(IST)
         else: df.index=df.index.tz_convert(IST)
         return df
-    except: return None
+    except Exception as e:
+        print(f"YF Error {symbol}: {e}")
+        return None
 
 def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist):
     time.sleep(75)
