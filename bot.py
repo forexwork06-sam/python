@@ -1,6 +1,6 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import time, threading, os, datetime, pytz, asyncio
+import time, threading, os, datetime, pytz
 import pandas as pd
 import ta
 from collections import defaultdict
@@ -14,16 +14,6 @@ if not BOT_TOKEN:
     time.sleep(3)
     exit(0)
 
-QUOTEX_EMAIL = os.getenv("QUOTEX_EMAIL")
-QUOTEX_PASSWORD = os.getenv("QUOTEX_PASSWORD")
-
-try:
-    try: from quotexapi.stable_api import Quotex
-    except: from pyquotex.stable_api import Quotex
-except Exception as e:
-    print(f"Quotex lib missing {e} - YFINANCE only")
-    Quotex = None
-
 IST = pytz.timezone('Asia/Kolkata')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 
@@ -36,8 +26,6 @@ PENDING_TRADES={}
 LOSS_COUNT=defaultdict(int)
 DISABLED_TODAY=set()
 CURRENT_DAY=datetime.datetime.now(IST).date()
-USE_QUOTEX=False
-q_client=None
 
 def reset_daily_if_needed():
     global CURRENT_DAY, LOSS_COUNT, DISABLED_TODAY
@@ -49,11 +37,10 @@ def reset_daily_if_needed():
 
 def get_main_keyboard():
     markup=InlineKeyboardMarkup(row_width=2)
-    mode_txt="QUOTEX" if USE_QUOTEX else "YFINANCE"
     markup.add(InlineKeyboardButton("▶️ Start Bot",callback_data="start_bot"),InlineKeyboardButton("⏹️ Stop Bot",callback_data="stop_bot"))
     markup.add(InlineKeyboardButton(f"Select Market ({len(selected_pairs)}/{len(ALL_PAIRS)})",callback_data="select_market"),InlineKeyboardButton("Timeframe: 1m",callback_data="timeframe"))
-    markup.add(InlineKeyboardButton(f"Score Filter: {SCORE_THRESHOLD}%",callback_data="score_menu"),InlineKeyboardButton(f"Status [{mode_txt}]",callback_data="status"))
-    markup.add(InlineKeyboardButton("🔴 Mode: QUOTEX",callback_data="mode_quotex"),InlineKeyboardButton("🟢 Mode: YFINANCE",callback_data="mode_yfinance"))
+    markup.add(InlineKeyboardButton(f"Score Filter: {SCORE_THRESHOLD}%",callback_data="score_menu"),InlineKeyboardButton(f"Status [YFINANCE ✅]",callback_data="status"))
+    markup.add(InlineKeyboardButton("🟢 Mode: YFINANCE ACTIVE ✅",callback_data="mode_yfinance"))
     return markup
 
 def get_score_keyboard():
@@ -137,39 +124,14 @@ def get_data_yf(symbol="EURUSD=X"):
         return df
     except: return None
 
-async def get_data_quotex(asset):
-    global q_client
-    try:
-        if q_client is None: return None
-        try: candles=await q_client.get_candle_v2(asset,60)
-        except: candles=await q_client.get_candles(asset,60,100,1)
-        if not candles: return None
-        df=pd.DataFrame(candles)
-        if 'open' in df.columns: df=df.rename(columns={'open':'Open','close':'Close','high':'High','low':'Low'})
-        for c in ['Open','High','Low','Close']:
-            if c in df.columns: df[c]=pd.to_numeric(df[c],errors='coerce')
-        df=df.dropna().tail(250)
-        if len(df)<50: return None
-        return df
-    except: return None
-
-def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist,use_q):
+def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist):
     time.sleep(75)
     try:
         if pair not in PENDING_TRADES: return
         close_price=entry_price
-        if use_q:
-            try:
-                loop=asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-                asset=pair.replace(" (OTC)","").replace("/","")+"_otc" if "(OTC)" in pair else pair.replace("/","")
-                df=loop.run_until_complete(get_data_quotex(asset))
-                if df is not None and len(df)>0: close_price=df['Close'].iloc[-1]
-                loop.close()
-            except: pass
-        else:
-            clean_pair=pair.replace(" (OTC)","").replace("/","")
-            df=get_data_yf(f"{clean_pair}=X")
-            if df is not None and len(df)>0: close_price=df['Close'].iloc[-1]
+        clean_pair=pair.replace(" (OTC)","").replace("/","")
+        df=get_data_yf(f"{clean_pair}=X")
+        if df is not None and len(df)>0: close_price=df['Close'].iloc[-1]
         win=(signal_type=="BUY" and close_price>entry_price) or (signal_type=="SELL" and close_price<entry_price)
         now_ist=datetime.datetime.now(IST).strftime('%I:%M:%S %p IST')
         reset_daily_if_needed()
@@ -186,35 +148,13 @@ def check_win_loss(chat_id,pair,signal_type,entry_price,entry_time_ist,use_q):
     except:
         if pair in PENDING_TRADES: del PENDING_TRADES[pair]
 
-def create_quotex_client():
-    if Quotex is None: return None
-    return Quotex(email=QUOTEX_EMAIL,password=QUOTEX_PASSWORD)
-
 def scanner_loop(chat_id):
-    global bot_active,q_client,USE_QUOTEX
+    global bot_active
     last_min=-1
-    loop=asyncio.new_event_loop(); asyncio.set_event_loop(loop)
-    if USE_QUOTEX:
-        try:
-            if not QUOTEX_EMAIL or not QUOTEX_PASSWORD:
-                bot.send_message(chat_id,"❌ QUOTEX_EMAIL/PASSWORD missing! YFINANCE use karo")
-                USE_QUOTEX=False
-            else:
-                q_client=create_quotex_client()
-                bot.send_message(chat_id,f"🔄 Connecting Quotex...")
-                check,reason=loop.run_until_complete(q_client.connect())
-                if not check:
-                    bot.send_message(chat_id,f"❌ Quotex Fail: {reason}\nYFINANCE pe switch ho raha hu",reply_markup=get_main_keyboard())
-                    USE_QUOTEX=False
-                time.sleep(2)
-        except Exception as e:
-            bot.send_message(chat_id,f"❌ Connect Error: {e}\nYFINANCE mode",reply_markup=get_main_keyboard())
-            USE_QUOTEX=False
     while bot_active:
         try:
             reset_daily_if_needed()
             now_ist=datetime.datetime.now(IST)
-            # 30 SEC PEHLE SIGNAL - 25 to 35 sec window
             if now_ist.second<25 or now_ist.second>35:
                 time.sleep(1)
                 continue
@@ -228,14 +168,8 @@ def scanner_loop(chat_id):
                 if pair in DISABLED_TODAY: continue
                 if pair in LAST_SIGNAL and (now_ist-LAST_SIGNAL[pair]).total_seconds()<70: continue
                 if pair in PENDING_TRADES: continue
-                df=None
-                is_q=USE_QUOTEX
-                if USE_QUOTEX:
-                    asset=pair.replace(" (OTC)","").replace("/","")+"_otc" if "(OTC)" in pair else pair.replace("/","")
-                    df=loop.run_until_complete(get_data_quotex(asset))
-                else:
-                    clean_pair=pair.replace(" (OTC)","").replace("/","")
-                    df=get_data_yf(f"{clean_pair}=X")
+                clean_pair=pair.replace(" (OTC)","").replace("/","")
+                df=get_data_yf(f"{clean_pair}=X")
                 if df is None or len(df)<50: continue
                 score,conf,sig_type,reasons=calculate_score_6factor(df)
                 if sig_type and score>=SCORE_THRESHOLD:
@@ -243,33 +177,30 @@ def scanner_loop(chat_id):
                     entry_price=df['Close'].iloc[-1]
                     entry_time_str=next_entry_time.strftime('%I:%M:%S %p IST')
                     PENDING_TRADES[pair]={"entry_price":entry_price,"type":sig_type,"time":now_ist}
-                    src="QUOTEX" if is_q else "YFINANCE"
                     loss_info=f"Loss:{LOSS_COUNT[pair]}/2" if LOSS_COUNT[pair]>0 else "Loss:0/2"
-                    msg=f"{pair} {sig_type} SIGNAL [{src}]\nScore: {score}/100 | Conf: {conf}% | {loss_info}\nEntry: Next 1m OPEN - {entry_time_str}\n"+"\n".join(reasons)+f"\n{now_ist.strftime('%I:%M:%S %p IST')} | Filter {SCORE_THRESHOLD}%"
+                    msg=f"{pair} {sig_type} SIGNAL [YFINANCE]\nScore: {score}/100 | Conf: {conf}% | {loss_info}\nEntry: Next 1m OPEN - {entry_time_str}\n"+"\n".join(reasons)+f"\n{now_ist.strftime('%I:%M:%S %p IST')} | Filter {SCORE_THRESHOLD}%"
                     bot.send_message(chat_id,msg)
-                    threading.Thread(target=check_win_loss,args=(chat_id,pair,sig_type,entry_price,entry_time_str,is_q),daemon=True).start()
+                    threading.Thread(target=check_win_loss,args=(chat_id,pair,sig_type,entry_price,entry_time_str),daemon=True).start()
             time.sleep(1)
         except Exception as e:
             print(f"Loop error {e}")
             time.sleep(1)
-    loop.close()
 
 @bot.message_handler(commands=['start'])
 def start_handler(message):
     if message.chat.id not in OWNER_IDS: bot.send_message(message.chat.id,"Bot Locked."); return
-    mode="QUOTEX OTC" if USE_QUOTEX else "YFINANCE REAL"
     disabled=", ".join(DISABLED_TODAY) if DISABLED_TODAY else "None"
-    bot.send_message(message.chat.id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\nDisabled Today (2 Loss): {disabled}",reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id,f"Mode: YFINANCE REAL ✅\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%\nDisabled Today (2 Loss): {disabled}",reply_markup=get_main_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
-    global bot_active,selected_pairs,SCORE_THRESHOLD,USE_QUOTEX
+    global bot_active,selected_pairs,SCORE_THRESHOLD
     if call.message.chat.id not in OWNER_IDS: return
     chat_id=call.message.chat.id; data=call.data
     if data=="start_bot":
         if not bot_active:
             bot_active=True
-            bot.send_message(chat_id,f"🚀 Started | Filter {SCORE_THRESHOLD}% | Mode: {'QUOTEX' if USE_QUOTEX else 'YFINANCE'} | Pairs: {len(selected_pairs)}",reply_markup=get_main_keyboard())
+            bot.send_message(chat_id,f"🚀 Started | Filter {SCORE_THRESHOLD}% | Mode: YFINANCE | Pairs: {len(selected_pairs)}",reply_markup=get_main_keyboard())
             threading.Thread(target=scanner_loop,args=(chat_id,),daemon=True).start()
     elif data=="stop_bot": bot_active=False; bot.send_message(chat_id,"⏹️ Stopped",reply_markup=get_main_keyboard())
     elif data=="select_market": bot.edit_message_text(f"Select Market ({len(ALL_PAIRS)} Pairs):",chat_id,call.message.message_id,reply_markup=get_market_keyboard())
@@ -295,20 +226,16 @@ def callback_handler(call):
     elif data.startswith("tf_"): bot.send_message(chat_id,f"TF set",reply_markup=get_main_keyboard())
     elif data=="score_menu": bot.edit_message_text(f"Current: {SCORE_THRESHOLD}%",chat_id,call.message.message_id,reply_markup=get_score_keyboard())
     elif data.startswith("score_"):
-        SCORE_THRESHOLD=int(data.split("_")[1]); bot.send_message(chat_id,f"Filter: {SCORE_THRESHOLD}% set. | Mode: TEST (20%)" if SCORE_THRESHOLD==20 else f"Filter: {SCORE_THRESHOLD}% set.",reply_markup=get_main_keyboard())
+        SCORE_THRESHOLD=int(data.split("_")[1]); bot.send_message(chat_id,f"Filter: {SCORE_THRESHOLD}% set.",reply_markup=get_main_keyboard())
     elif data=="status":
         pending=", ".join(PENDING_TRADES.keys()) if PENDING_TRADES else "None"
         disabled=", ".join(DISABLED_TODAY) if DISABLED_TODAY else "None"
         loss_detail="\n".join([f"{k}:{v}/2" for k,v in LOSS_COUNT.items() if v>0]) or "No losses today"
-        mode="QUOTEX" if USE_QUOTEX else "YFINANCE"
-        bot.send_message(chat_id,f"Mode: {mode}\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%\nPending: {pending}\nLoss Count:\n{loss_detail}\nDisabled Today: {disabled}",reply_markup=get_main_keyboard())
+        bot.send_message(chat_id,f"Mode: YFINANCE\nStatus: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nFilter: {SCORE_THRESHOLD}%\nPending: {pending}\nLoss Count:\n{loss_detail}\nDisabled Today: {disabled}",reply_markup=get_main_keyboard())
     elif data=="back_main": bot.edit_message_text(f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}/{len(ALL_PAIRS)}\nFilter: {SCORE_THRESHOLD}%",chat_id,call.message.message_id,reply_markup=get_main_keyboard())
-    elif data=="mode_quotex":
-        if Quotex is None: bot.send_message(chat_id,"❌ Quotex lib not installed, YFINANCE hi use karo",reply_markup=get_main_keyboard())
-        else: USE_QUOTEX=True; bot.send_message(chat_id,"✅ QUOTEX mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
-    elif data=="mode_yfinance": USE_QUOTEX=False; bot.send_message(chat_id,"✅ YFINANCE mode set. Stop->Start karo.",reply_markup=get_main_keyboard())
+    elif data=="mode_yfinance": bot.send_message(chat_id,"✅ YFINANCE mode ACTIVE hai",reply_markup=get_main_keyboard())
 
-print("Bot running FINAL FIXED V3 - 20% TEST + 30sec Early + 409 Patch...")
+print("Bot running YFINANCE ONLY - CLEAN V4")
 try:
     bot.remove_webhook()
     time.sleep(1)
@@ -326,7 +253,7 @@ while True:
         err=str(e)
         print(f"Polling error {err}")
         if "409" in err or "Conflict" in err:
-            print("409 Conflict detected - clearing webhook and waiting 15s...")
+            print("409 Conflict - waiting 15s...")
             try: bot.delete_webhook(drop_pending_updates=True)
             except: pass
             time.sleep(15)
