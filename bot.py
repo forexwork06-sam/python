@@ -228,7 +228,7 @@ def scanner_loop(chat_id):
 
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    if OWNER_ID and message.chat.id!= OWNER_ID:
+       if message.chat.id not in OWNER_IDS:
         bot.send_message(message.chat.id, "Bot Locked.")
         return
     bot.send_message(message.chat.id, f"Status: {'ACTIVE' if bot_active else 'STOPPED'}\nPairs: {len(selected_pairs)}\nTF: {timeframe} | Filter: {SCORE_THRESHOLD}%", reply_markup=get_main_keyboard())
@@ -236,7 +236,7 @@ def start_handler(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     global bot_active, timeframe, selected_pairs, SCORE_THRESHOLD
-    if OWNER_ID and call.message.chat.id!= OWNER_ID:
+        if call.message.chat.id not in OWNER_IDS:
         bot.answer_callback_query(call.id, "Locked")
         return
     chat_id = call.message.chat.id
