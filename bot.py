@@ -69,9 +69,17 @@ def get_control_keyboard():
     return {"inline_keyboard": [[{"text": "🟢 Start Bot", "callback_data": "startbot"}, {"text": "🔴 Stop Bot", "callback_data": "stopbot"}],[{"text": "📈 Select Market", "callback_data": "show_market"}, {"text": "⏱ Timeframe", "callback_data": "show_tf"}],[{"text": "🎯 Score Filter", "callback_data": "show_filter"}, {"text": "📊 Status", "callback_data": "status"}]]}
 def get_tf_keyboard():
     return {"inline_keyboard": [[{"text": "1m", "callback_data": "tf_1"}, {"text": "2m", "callback_data": "tf_2"}, {"text": "5m", "callback_data": "tf_5"}],[{"text": "⬅️ Back", "callback_data": "back_panel"}]]}
+
 def get_panel():
     s="RUNNING" if BOT_RUNNING else "STOPPED"
-    return f"SAM.AI REAL DATA {s}\nSelected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"
+    return f"""SAM AI REAL DATA {s}
+Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m
+
+MAX 2 PAIRS ONLY
+2 MIN & 5 MIN SUPPORTED
+
+DISCLAIMER: AI FOR ANALYSIS ONLY. OWNER NOT RESPONSIBLE FOR LOSS.
+Owner - @Real_Sam_win"""
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
@@ -172,53 +180,20 @@ def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
     try:
         symbol = TWELVE_MAP.get(pair, "EUR/USD")
         api_key = os.getenv("TWELVE_API_KEY", "demo").strip()
-        print(f"Using API Key: {api_key[:6]}... for {pair}")
-
-        # FIXED LOGIC FOR 2MIN
-        is_2min_fix = False
-        if tf_minutes == 2:
-            interval = "1min"
-            is_2min_fix = True
-            fetch_count = count * 2
-        elif tf_minutes == 5:
-            interval = "5min"
-            fetch_count = count
-        else:
-            interval = "1min"
-            fetch_count = count
-
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={fetch_count}&apikey={api_key}"
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={'1min' if tf_minutes in [1,2] else '5min'}&outputsize={count*2 if tf_minutes==2 else count}&apikey={api_key}"
         r = requests.get(url, timeout=15).json()
         values = r.get("values", [])
-        if len(values) < 100:
-            print(f"REAL DATA fail {pair}: {r}")
-            return None
+        if len(values) < 100: return None
         values = values[::-1]
         df = pd.DataFrame(values)
-        df["open"] = df["open"].astype(float)
-        df["high"] = df["high"].astype(float)
-        df["low"] = df["low"].astype(float)
-        df["close"] = df["close"].astype(float)
-        df["volume"] = 1500
-
-        if is_2min_fix and len(df) >= 2:
-            df2 = []
+        df["open"] = df["open"].astype(float); df["high"] = df["high"].astype(float); df["low"] = df["low"].astype(float); df["close"] = df["close"].astype(float); df["volume"] = 1500
+        if tf_minutes==2 and len(df)>=2:
+            df2=[]
             for i in range(0, len(df)-1, 2):
-                df2.append({
-                    "open": df.iloc[i]["open"],
-                    "high": max(df.iloc[i]["high"], df.iloc[i+1]["high"]),
-                    "low": min(df.iloc[i]["low"], df.iloc[i+1]["low"]),
-                    "close": df.iloc[i+1]["close"],
-                    "volume": 1500,
-                    "datetime": df.iloc[i+1].get("datetime", "")
-                })
-            df = pd.DataFrame(df2)
-
-        print(f"REAL DATA OK {pair} -> {symbol} {len(df)} candles Last {df['close'].iloc[-1]} TF:{tf_minutes}m")
+                df2.append({"open": df.iloc[i]["open"], "high": max(df.iloc[i]["high"], df.iloc[i+1]["high"]), "low": min(df.iloc[i]["low"], df.iloc[i+1]["low"]), "close": df.iloc[i+1]["close"], "volume": 1500})
+            df=pd.DataFrame(df2)
         return df
-    except Exception as e:
-        print(f"REAL DATA Error {pair}: {e}")
-        return None
+    except: return None
 
 def wait_for_early_signal(tf_minutes):
     while True:
@@ -240,12 +215,9 @@ def format_legend_message(res, pair, entry_time, signal_time):
     msg = f"""📊 *{pair_disp} | {TF}m*
 *Signal*: {direction}
 *Time*: {entry_time.strftime('%H:%M IST')} (DOT {signal_time.strftime('%H:%M:%S')})
-
 *Score*: {conf}% - {res["signal_type"]}
 {bar} {raw}/100
-
 {strength}
-
 *Entry*: Next candle
 *Real Market Data*
 """
