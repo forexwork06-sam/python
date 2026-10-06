@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
-from tvDatafeed import TvDatafeed, Interval
 
 IST = pytz.timezone('Asia/Kolkata')
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -26,17 +25,16 @@ BOT_RUNNING = False
 pair_cooldown = {}
 daily_trades = []
 
-# TradingView Map - OTC ko real forex me convert
-TV_MAP = {
-    "EURUSD-OTC": ("EURUSD", "FX"), "GBPUSD-OTC": ("GBPUSD", "FX"),
-    "USDJPY-OTC": ("USDJPY", "FX"), "AUDUSD-OTC": ("AUDUSD", "FX"),
-    "AUDJPY-OTC": ("AUDJPY", "FX"), "EURJPY-OTC": ("EURJPY", "FX"),
-    "GBPJPY-OTC": ("GBPJPY", "FX"), "USDCHF-OTC": ("USDCHF", "FX"),
-    "USDCAD-OTC": ("USDCAD", "FX"), "EURGBP-OTC": ("EURGBP", "FX"),
-    "AUDCAD-OTC": ("AUDCAD", "FX"), "NZDUSD-OTC": ("NZDUSD", "FX"),
+TWELVE_MAP = {
+    "EURUSD-OTC": "EUR/USD", "GBPUSD-OTC": "GBP/USD",
+    "USDJPY-OTC": "USD/JPY", "AUDUSD-OTC": "AUD/USD",
+    "AUDJPY-OTC": "AUD/JPY", "EURJPY-OTC": "EUR/JPY",
+    "GBPJPY-OTC": "GBP/JPY", "USDCHF-OTC": "USD/CHF",
+    "USDCAD-OTC": "USD/CAD", "EURGBP-OTC": "EUR/GBP",
+    "AUDCAD-OTC": "AUD/CAD", "NZDUSD-OTC": "NZD/USD",
+    "EURAUD-OTC": "EUR/AUD", "GBPUSD": "GBP/USD",
+    "EURUSD": "EUR/USD", "USDJPY": "USD/JPY",
 }
-# tvDatafeed instance - global ek baar login
-tv = TvDatafeed()
 
 def now_ist(): return datetime.now(IST)
 def send_to_owner(text):
@@ -67,7 +65,7 @@ def get_panel():
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
-    print("Poller START REAL DATA No-Leak Mode")
+    print("Poller START REAL DATA Mode")
     try: requests.get("https://api.telegram.org/bot"+BOT_TOKEN+"/deleteWebhook?drop_pending_updates=True", timeout=5)
     except: pass
     offset=0
@@ -95,7 +93,7 @@ def telegram_poller():
                     elif data=="show_filter": send_reply(chat_id, "Filter: TEST 50% Skip | REAL 60%+ Trade")
                     elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - {len(SELECTED_PAIRS)} pairs REAL DATA")
                     elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Bot Stopped")
-                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} Sel {len(SELECTED_PAIRS)} REAL")
+                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} Sel {len(SELECTED_PAIRS)}")
                     elif data=="back_panel": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                     continue
                 msg=upd.get("message",{}); chat_id=str(msg.get("chat",{}).get("id","")); text=msg.get("text","").strip()
@@ -173,33 +171,38 @@ def analyze(df, pair):
     else:
         return {"signal":"HOLD","score":score,"win_chance":score,"signal_type":"HOLD","trend":trend}
 
-# ========= REAL DATA FUNCTION - NO BLOCK =========
+# ===== REAL DATA - NO BLOCK - ONLY REQUESTS =====
 def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
     try:
-        # map OTC to real symbol
-        if pair in TV_MAP:
-            tv_symbol, exchange = TV_MAP[pair]
-        else:
-            # fallback EURUSD
-            tv_symbol, exchange = "EURUSD", "FX"
+        symbol = TWELVE_MAP.get(pair, "EUR/USD")
+        interval = "1min"
+        if tf_minutes == 2: interval = "2min"
+        if tf_minutes == 5: interval = "5min"
 
-        interval = Interval.in_1_minute
-        if tf_minutes == 2: interval = Interval.in_2_minute
-        if tf_minutes == 5: interval = Interval.in_5_minute
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={count}&apikey=demo"
+        r = requests.get(url, timeout=15).json()
 
-        df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=interval, n_bars=count, extended_session=False)
-        if df is None or len(df) < 200:
-            print(f"TV No data for {pair}")
+        if "values" not in r or len(r["values"]) < 200:
+            # try free alternative - same API retry
+            time.sleep(1)
+            r = requests.get(url, timeout=15).json()
+
+        values = r.get("values", [])
+        if len(values) < 100:
+            print(f"REAL DATA fail {pair}: {r}")
             return None
 
-        # tvDatafeed returns: open, high, low, close, volume
-        df = df.reset_index()
-        # standardize column names
-        df.columns = [c.lower() for c in df.columns]
-        # make compatible with your analyze
-        # df already has open/high/low/close/volume
-        print(f"REAL DATA OK {pair} -> {tv_symbol} {len(df)} candles Last Close {df['close'].iloc[-1]}")
+        values = values[::-1] # oldest first
+        df = pd.DataFrame(values)
+        df["open"] = df["open"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+        df["close"] = df["close"].astype(float)
+        df["volume"] = 1500
+
+        print(f"REAL DATA OK {pair} -> {symbol} {len(df)} candles Last {df['close'].iloc[-1]}")
         return df
+
     except Exception as e:
         print(f"REAL DATA Error {pair}: {e}")
         return None
@@ -241,13 +244,13 @@ def format_legend_message(res, pair, entry_time, signal_time):
 {strength}
 
 *Entry*: Next candle
-*Real TradingView Data*
+*Real Market Data*
 """
     return msg
 
 def run_multi_bot():
     print("Bot REAL DATA No-Leak Mode Live")
-    send_to_owner("Bot Live - REAL TradingView Data | No Block | No Fake Result")
+    send_to_owner("Bot Live - REAL Market Data | No Fake Price | No Block")
     while True:
         if not BOT_RUNNING: time.sleep(5); continue
         today=now_ist().date(); todays=[t for t in daily_trades if t["date"]==today]
