@@ -2,4 +2,5 @@ pandas
 numpy
 pytz
 requests
-python-dateutil
+python-telegram-bot==20.8
+tvDatafeed
