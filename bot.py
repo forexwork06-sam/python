@@ -171,10 +171,12 @@ def analyze(df, pair):
 def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
     try:
         symbol = TWELVE_MAP.get(pair, "EUR/USD")
+        api_key = os.getenv("TWELVE_API_KEY", "demo").strip()
+        print(f"Using API Key: {api_key[:6]}... for {pair}")
         interval = "1min"
         if tf_minutes == 2: interval = "2min"
         if tf_minutes == 5: interval = "5min"
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={count}&apikey=demo"
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={count}&apikey={api_key}"
         r = requests.get(url, timeout=15).json()
         values = r.get("values", [])
         if len(values) < 100:
@@ -209,7 +211,7 @@ def format_legend_message(res, pair, entry_time, signal_time):
     conf = res["win_chance"]; raw = res["score"]
     if conf < 65: strength = "MODERATE"; bar = "▓▓▓▓▓░░░░░"
     elif conf < 85: strength = "STRONG"; bar = "▓▓▓▓▓▓▓▓░░"
-    else: strength = "VERY STRONG"; bar = "▓▓▓▓▓▓▓▓▓▓"
+    else: strength = "VERY STRONG"; bar = "▓▓▓▓▓▓"
     msg = f"""📊 *{pair_disp} | {TF}m*
 *Signal*: {direction}
 *Time*: {entry_time.strftime('%H:%M IST')} (DOT {signal_time.strftime('%H:%M:%S')})
@@ -240,7 +242,7 @@ def run_multi_bot():
             if df is None: continue
             res=analyze(df,pair)
             if res["signal"] not in ["BUY","SELL"]: continue
-            if res["score"] < 60: continue # FINAL FIX - TEST SKIP
+            if res["score"] < 60: continue
             entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
             signal_time = entry_time - timedelta(seconds=30)
             legend_msg = format_legend_message(res, pair, entry_time, signal_time)
