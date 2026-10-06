@@ -173,10 +173,21 @@ def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
         symbol = TWELVE_MAP.get(pair, "EUR/USD")
         api_key = os.getenv("TWELVE_API_KEY", "demo").strip()
         print(f"Using API Key: {api_key[:6]}... for {pair}")
-        interval = "1min"
-        if tf_minutes == 2: interval = "2min"
-        if tf_minutes == 5: interval = "5min"
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={count}&apikey={api_key}"
+
+        # FIXED LOGIC FOR 2MIN
+        is_2min_fix = False
+        if tf_minutes == 2:
+            interval = "1min"
+            is_2min_fix = True
+            fetch_count = count * 2
+        elif tf_minutes == 5:
+            interval = "5min"
+            fetch_count = count
+        else:
+            interval = "1min"
+            fetch_count = count
+
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={fetch_count}&apikey={api_key}"
         r = requests.get(url, timeout=15).json()
         values = r.get("values", [])
         if len(values) < 100:
@@ -189,7 +200,21 @@ def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
         df["low"] = df["low"].astype(float)
         df["close"] = df["close"].astype(float)
         df["volume"] = 1500
-        print(f"REAL DATA OK {pair} -> {symbol} {len(df)} candles Last {df['close'].iloc[-1]}")
+
+        if is_2min_fix and len(df) >= 2:
+            df2 = []
+            for i in range(0, len(df)-1, 2):
+                df2.append({
+                    "open": df.iloc[i]["open"],
+                    "high": max(df.iloc[i]["high"], df.iloc[i+1]["high"]),
+                    "low": min(df.iloc[i]["low"], df.iloc[i+1]["low"]),
+                    "close": df.iloc[i+1]["close"],
+                    "volume": 1500,
+                    "datetime": df.iloc[i+1].get("datetime", "")
+                })
+            df = pd.DataFrame(df2)
+
+        print(f"REAL DATA OK {pair} -> {symbol} {len(df)} candles Last {df['close'].iloc[-1]} TF:{tf_minutes}m")
         return df
     except Exception as e:
         print(f"REAL DATA Error {pair}: {e}")
