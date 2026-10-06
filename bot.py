@@ -73,13 +73,7 @@ def get_tf_keyboard():
 def get_panel():
     s="RUNNING" if BOT_RUNNING else "STOPPED"
     return f"""SAM AI REAL DATA {s}
-Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m
-
-MAX 2 PAIRS ONLY
-2 MIN & 5 MIN SUPPORTED
-
-DISCLAIMER: AI FOR ANALYSIS ONLY. OWNER NOT RESPONSIBLE FOR LOSS.
-Owner - @Real_Sam_win"""
+Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"""
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
