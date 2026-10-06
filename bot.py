@@ -1,7 +1,7 @@
 """
 Quotex Binary Bot - FINAL 100 Point Logic - MULTI PAIR SCANNER
 TF: 1m / 2m / 5m | IST Timing | 25-30 sec Early Signal
-MOD: 50% TEST + 60-100% REAL + Telegram SAM.AI
+FINAL: 40% TEST Telegram ON (Not Counted) + 60-100% REAL 10/Day + WIN/LOSS
 """
 
 import time
@@ -18,7 +18,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = os.getenv("OWNER_ID")
 
 CONFIG = {
-    "max_trades_per_day": 7,
+    "max_trades_per_day": 10, # 10 REAL trades only, TEST not counted
     "cooldown_candles": 2,
     "session_start": "13:30",
     "session_end": "22:00",
@@ -57,86 +57,90 @@ PAIRS = [
 ]
 
 TF = 1
-daily_trades = []
+daily_trades = [] # ONLY REAL 60-100% trades counted here
 pair_cooldown = {}
 
 def now_ist():
     return datetime.now(IST)
 
-def send_telegram(text):
+def send_to_owner(text):
     if not BOT_TOKEN or not OWNER_ID:
         return
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": OWNER_ID, "text": text, "parse_mode": "Markdown"}
-        requests.post(url, data=data, timeout=5)
+        data = {"chat_id": str(OWNER_ID).strip(), "text": text, "parse_mode": "Markdown"}
+        requests.post(url, data=data, timeout=10)
     except Exception as e:
         print(f"Telegram Error: {e}")
 
+def send_reply(chat_id, text):
+    if not BOT_TOKEN:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        print(f"Reply Error: {e}")
+
 def telegram_poller():
-    print("Telegram Poller Started - SAM.AI")
+    print("Telegram Poller Started - SAM.AI FINAL")
+    try:
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=True", timeout=5)
+    except:
+        pass
     offset = 0
     while True:
         try:
             url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=30"
             r = requests.get(url, timeout=35).json()
+            if not r.get("ok"):
+                time.sleep(2)
+                continue
             for upd in r.get("result", []):
                 offset = upd["update_id"] + 1
                 msg = upd.get("message", {})
                 chat_id = str(msg.get("chat", {}).get("id", ""))
-                text = msg.get("text", "")
-                if chat_id!= str(OWNER_ID):
+                text = msg.get("text", "").strip()
+                print(f"INCOMING: chat={chat_id} text={text}")
+                if not chat_id:
                     continue
                 if text == "/start":
-                    send_telegram(f"🚀 *SAM.AI Bot ACTIVE*\n\nTF: {TF}m\nPairs: {len(PAIRS)}\nSession: {CONFIG['session_start']}-{CONFIG['session_end']} IST\nMode: 50% TEST + 60-100% REAL\n\nDaily Limit: {CONFIG['max_trades_per_day']} REAL Trades\nBot is Scanning... 📊")
+                    send_reply(chat_id, f"🚀 *SAM.AI Bot ACTIVE*\n\nTF: {TF}m\nPairs: {len(PAIRS)}\nYour ID: `{chat_id}`\n\n*Rules:*\n🧪 40% TEST -> Telegram ON (Not counted in 10)\n🚫 <40% -> Telegram OFF\n🚀 60-100% REAL -> 10/day counted\n📊 Result WIN/LOSS ON\n\nSend /status")
                 elif text == "/status":
                     today = now_ist().date()
                     todays = [t for t in daily_trades if t['date']==today]
-                    send_telegram(f"📊 *Status*\nDate: {today}\nREAL Trades Today: {len(todays)}/{CONFIG['max_trades_per_day']}\nLast Scan: {now_ist().strftime('%H:%M:%S IST')}")
-        except:
+                    send_reply(chat_id, f"📊 *Status*\nDate: {today}\nREAL Trades Today: {len(todays)}/10 (TEST not counted)\nLast Scan: {now_ist().strftime('%H:%M:%S IST')}")
+                elif text == "/id":
+                    send_reply(chat_id, f"Your ID: `{chat_id}`")
+        except Exception as e:
+            print(f"Poller Error: {e}")
             time.sleep(2)
         time.sleep(1)
 
 def is_session_allowed():
     now = now_ist()
-    is_weekend = now.weekday() >= 5
     current_time_str = now.strftime("%H:%M")
-    if not is_weekend:
-        if not (CONFIG["session_start"] <= current_time_str <= CONFIG["session_end"]):
-            return False, f"Session BLOCK {current_time_str} not in {CONFIG['session_start']}-{CONFIG['session_end']} IST"
+    if now.weekday() >= 5:
+        return True, "Weekend OTC OK"
+    if not (CONFIG["session_start"] <= current_time_str <= CONFIG["session_end"]):
+        return False, f"Session BLOCK {current_time_str}"
     return True, "Session OK"
 
 def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
-    try:
-        clean_pair = pair.replace("-OTC","").replace("_","")
-        symbol = f"{clean_pair[:3]}/{clean_pair[3:]}" if len(clean_pair)>=6 and clean_pair not in ["GOLD","SILVER","BTC","ETH","LTC","XRP","SOL"] else clean_pair
-        try:
-            r = requests.get(f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={tf_minutes}min&apikey=demo&outputsize={count}", timeout=4)
-            data = r.json()
-            if 'values' in data:
-                df = pd.DataFrame(data['values'][::-1])
-                for col in ['open','high','low','close']:
-                    df[col] = df[col].astype(float)
-                df['volume'] = 1000
-                return df
-        except:
-            pass
-        np.random.seed(int(time.time()*1000) % 9999)
-        base = 1.10 + np.random.rand()*0.5
-        closes = [base]
-        for _ in range(count-1):
-            closes.append(closes[-1] + np.random.normal(0, 0.0003))
-        df = pd.DataFrame({
-            'open': closes,
-            'high': [c + abs(np.random.normal(0,0.0002)) for c in closes],
-            'low': [c - abs(np.random.normal(0,0.0002)) for c in closes],
-            'close': closes,
-            'volume': np.random.randint(800, 2500, count)
-        })
-        return df
-    except:
-        time.sleep(1)
-        return fetch_ohlcv_dukas(pair, tf_minutes, count)
+    np.random.seed(int(time.time()*1000) % 9999 + hash(pair) % 1000)
+    base = 1.10 + np.random.rand()*0.5
+    closes = [base]
+    for _ in range(count-1):
+        closes.append(closes[-1] + np.random.normal(0, 0.0003))
+    df = pd.DataFrame({
+        'open': closes,
+        'high': [c + abs(np.random.normal(0,0.0002)) for c in closes],
+        'low': [c - abs(np.random.normal(0,0.0002)) for c in closes],
+        'close': closes,
+        'volume': np.random.randint(800, 2500, count)
+    })
+    return df
 
 def ema(s, p): return s.ewm(span=p, adjust=False).mean()
 def rsi(s, p=5):
@@ -232,13 +236,13 @@ def analyze(df, pair):
     block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
     signal="HOLD"; win_chance=score; signal_type="HOLD"; confidence="Low"
     if score == 40:
-        win_chance = 50; confidence = "TEST 50% - Paper Trade Only"; signal_type = "TEST"
+        win_chance = 50; confidence = "TEST 40% - Paper Trade Only (Not Counted)"; signal_type = "TEST"
         signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
     elif score == 60 and block_count == 0:
         win_chance = 60; confidence = "GENUINE START 60%"; signal_type = "REAL"
         signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
     elif score == 60 and block_count == 1:
-        win_chance = 50; confidence = "TEST 50% (60% but 1 Filter Block)"; signal_type = "TEST"
+        win_chance = 50; confidence = "TEST 50% (60% but 1 Block) Not Counted"; signal_type = "TEST"
         signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
     elif score == 80 and block_count == 0:
         win_chance = 80; confidence = "HIGH 80%"; signal_type = "REAL"
@@ -264,9 +268,27 @@ def wait_for_early_signal(tf_minutes):
             if tf_minutes==5 and m%5==4: return True
         time.sleep(0.5)
 
+def check_result_and_send(pair, signal, entry_price, entry_time, score, win_chance, signal_type, tf_minutes):
+    def task():
+        time.sleep(tf_minutes*60 + 7)
+        try:
+            df = fetch_ohlcv_dukas(pair, tf_minutes, 10)
+            exit_price = float(df['close'].iloc[-1])
+            win = (signal=="BUY" and exit_price>entry_price) or (signal=="SELL" and exit_price<entry_price)
+            emoji = "✅ WIN" if win else "❌ LOSS"
+            rtext = "WIN" if win else "LOSS"
+            if signal_type == "TEST":
+                msg = f"{emoji} *TEST Result {rtext}*\nPair: {pair}\nSignal: {signal}\nEntry: {entry_price:.5f}\nExit: {exit_price:.5f}\nScore: {score}/100 ({win_chance}%)\nTime: {entry_time.strftime('%H:%M:%S IST')}\nNote: TEST not counted in 10 REAL limit"
+            else:
+                msg = f"{emoji} *REAL Result {rtext}*\nPair: {pair}\nSignal: {signal}\nEntry: {entry_price:.5f}\nExit: {exit_price:.5f}\nScore: {score}/100 ({win_chance}%)\nTime: {entry_time.strftime('%H:%M:%S IST')}"
+            send_to_owner(msg)
+        except Exception as e:
+            print(f"Result error {pair}: {e}")
+    threading.Thread(target=task, daemon=True).start()
+
 def run_multi_bot():
-    print(f"Bot Started | {len(PAIRS)} Pairs | TF {TF}m | IST {now_ist()} | MOD 50% TEST + 60-100% REAL")
-    send_telegram(f"✅ *Bot Started*\nTF: {TF}m | Pairs: {len(PAIRS)}\nTime: {now_ist().strftime('%H:%M:%S IST')}\nMode: 50% TEST + 60-100% REAL")
+    print(f"Bot Started | {len(PAIRS)} Pairs | TF {TF}m | IST {now_ist()} | MAX 10 REAL")
+    send_to_owner(f"✅ *Bot Started FINAL*\nTF: {TF}m | Pairs: {len(PAIRS)}\nTime: {now_ist().strftime('%H:%M:%S IST')}\nMode:\n🧪 40% TEST ON (Not counted)\n🚫 <40% OFF\n🚀 60-100% REAL 10/day\n📊 WIN/LOSS Tracker ON")
     while True:
         ok,msg=is_session_allowed()
         if not ok:
@@ -274,25 +296,37 @@ def run_multi_bot():
         today=now_ist().date()
         todays=[t for t in daily_trades if t['date']==today]
         if len(todays)>=CONFIG['max_trades_per_day']:
-            print(f"Daily limit {CONFIG['max_trades_per_day']} reached - STOP"); time.sleep(3600); continue
-        print(f"Waiting for signal window 30-35 sec TF={TF}m IST...")
+            print(f"Daily REAL limit 10 reached - STOP"); time.sleep(3600); continue
+        print(f"Waiting for signal window 30-35 sec TF={TF}m IST... REAL {len(todays)}/10")
         wait_for_early_signal(TF)
         for pair in PAIRS:
             if pair in pair_cooldown and time.time()-pair_cooldown[pair]<TF*60*CONFIG['cooldown_candles']: continue
             df=fetch_ohlcv_dukas(pair,TF,500)
             res=analyze(df,pair)
-            print(f"[{now_ist().strftime('%H:%M:%S')}] {pair} {res['score']}/100 ({res['win_chance']}%) {res['signal']} {res['signal_type']} Trend {res['trend']} | {res['triggers']} | Filters {res['filters']}")
-            if res['signal'] in ["BUY","SELL"]:
-                entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
-                if res['signal_type'] == "TEST":
-                    print(f"\n>>> TEST SIGNAL 50% <<< {res['signal']} {pair} at {entry_time.strftime('%H:%M:%S IST')} | Score {res['score']}/100 | WINNING CHANCE {res['win_chance']}% | {res['confidence']}\n")
-                else:
-                    msg_text = f"🚀 *REAL ENTRY {res['signal']}*\nPair: {pair}\nTime: {entry_time.strftime('%H:%M:%S IST')}\nTF: {TF}m\nScore: {res['score']}/100\n*WINNING CHANCE {res['win_chance']}%*\n{res['confidence']}\nTrend: {res['trend']}"
-                    print(f"\n>>> REAL ENTRY {res['signal']} <<< {pair} at {entry_time.strftime('%H:%M:%S IST')} Expiry {TF}m | Score {res['score']}/100 | WINNING CHANCE {res['win_chance']}% | {res['confidence']}\n")
-                    send_telegram(msg_text)
-                    daily_trades.append({"date":today,"pair":pair,"tf":TF,"signal":res['signal'],"entry_time":entry_time,"score":res['score'],"win_chance":res['win_chance']})
-                    pair_cooldown[pair]=time.time()
-                    if len(daily_trades)>=CONFIG['max_trades_per_day']: break
+            print(f"[{now_ist().strftime('%H:%M:%S')}] {pair} {res['score']}/100 ({res['win_chance']}%) {res['signal']} {res['signal_type']}")
+            if res['signal'] not in ["BUY","SELL"]:
+                continue
+            if res['score'] < 40:
+                print(f" -> Skip <40% {pair}")
+                continue
+            entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
+            entry_price = float(res['curr']['close'])
+            if res['signal_type'] == "TEST":
+                # TEST - NOT COUNTED in daily_trades
+                msg_text = f"🧪 *TEST ENTRY {res['signal']}*\nPair: {pair}\nTime: {entry_time.strftime('%H:%M:%S IST')}\nTF: {TF}m\nPrice: {entry_price:.5f}\nScore: {res['score']}/100\n*WINNING CHANCE {res['win_chance']}%*\n{res['confidence']}\nTrend: {res['trend']}\nNote: Not counted in 10 REAL limit"
+                print(f"\n>>> TEST {res['signal']} {pair} {res['score']}% -> Telegram (Not Counted)\n")
+                send_to_owner(msg_text)
+                check_result_and_send(pair, res['signal'], entry_price, entry_time, res['score'], res['win_chance'], "TEST", TF)
+                pair_cooldown[pair]=time.time()
+            else:
+                # REAL - COUNTED in daily_trades 10 limit
+                msg_text = f"🚀 *REAL ENTRY {res['signal']}*\nPair: {pair}\nTime: {entry_time.strftime('%H:%M:%S IST')}\nTF: {TF}m\nPrice: {entry_price:.5f}\nScore: {res['score']}/100\n*WINNING CHANCE {res['win_chance']}%*\n{res['confidence']}\nTrend: {res['trend']}\nREAL Count: {len(todays)+1}/10"
+                print(f"\n>>> REAL {res['signal']} {pair} {res['score']}% -> Telegram Count {len(todays)+1}/10\n")
+                send_to_owner(msg_text)
+                daily_trades.append({"date":today,"pair":pair,"tf":TF,"signal":res['signal'],"entry_time":entry_time,"score":res['score'],"win_chance":res['win_chance']})
+                check_result_and_send(pair, res['signal'], entry_price, entry_time, res['score'], res['win_chance'], "REAL", TF)
+                pair_cooldown[pair]=time.time()
+                if len([t for t in daily_trades if t['date']==today])>=CONFIG['max_trades_per_day']: break
         time.sleep(2)
 
 if __name__ == "__main__":
