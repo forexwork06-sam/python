@@ -26,14 +26,24 @@ pair_cooldown = {}
 daily_trades = []
 
 TWELVE_MAP = {
-    "EURUSD-OTC": "EUR/USD", "GBPUSD-OTC": "GBP/USD",
-    "USDJPY-OTC": "USD/JPY", "AUDUSD-OTC": "AUD/USD",
-    "AUDJPY-OTC": "AUD/JPY", "EURJPY-OTC": "EUR/JPY",
-    "GBPJPY-OTC": "GBP/JPY", "USDCHF-OTC": "USD/CHF",
-    "USDCAD-OTC": "USD/CAD", "EURGBP-OTC": "EUR/GBP",
-    "AUDCAD-OTC": "AUD/CAD", "NZDUSD-OTC": "NZD/USD",
-    "EURAUD-OTC": "EUR/AUD", "GBPUSD": "GBP/USD",
-    "EURUSD": "EUR/USD", "USDJPY": "USD/JPY",
+    "EURUSD-OTC": "EUR/USD", "GBPUSD-OTC": "GBP/USD", "USDJPY-OTC": "USD/JPY",
+    "AUDUSD-OTC": "AUD/USD", "AUDJPY-OTC": "AUD/JPY", "EURJPY-OTC": "EUR/JPY",
+    "GBPJPY-OTC": "GBP/JPY", "USDCHF-OTC": "USD/CHF", "USDCAD-OTC": "USD/CAD",
+    "EURGBP-OTC": "EUR/GBP", "AUDCAD-OTC": "AUD/CAD", "NZDUSD-OTC": "NZD/USD",
+    "EURAUD-OTC": "EUR/AUD", "EURCAD-OTC": "EUR/CAD", "EURCHF-OTC": "EUR/CHF",
+    "GBPAUD-OTC": "GBP/AUD", "GBPCAD-OTC": "GBP/CAD", "GBPCHF-OTC": "GBP/CHF",
+    "AUDCHF-OTC": "AUD/CHF", "AUDNZD-OTC": "AUD/NZD", "CADCHF-OTC": "CAD/CHF",
+    "CADJPY-OTC": "CAD/JPY", "CHFJPY-OTC": "CHF/JPY", "EURNZD-OTC": "EUR/NZD",
+    "GBPNZD-OTC": "GBP/NZD", "NZDCAD-OTC": "NZD/CAD", "NZDCHF-OTC": "NZD/CHF",
+    "NZDJPY-OTC": "NZD/JPY", "EURSGD-OTC": "EUR/SGD", "USDBRL-OTC": "USD/BRL",
+    "USDINR-OTC": "USD/INR", "USDBDT-OTC": "USD/BDT", "USDMXN-OTC": "USD/MXN",
+    "USDARS-OTC": "USD/ARS", "USDTRY-OTC": "USD/TRY", "USDPKR-OTC": "USD/PKR",
+    "USDNGN-OTC": "USD/NGN", "USDPHP-OTC": "USD/PHP", "USDIDR-OTC": "USD/IDR",
+    "USDZAR-OTC": "USD/ZAR", "USDEGP-OTC": "USD/EGP", "USDCOP-OTC": "USD/COP",
+    "USDDZD-OTC": "USD/DZD", "BRLUSD-OTC": "BRL/USD", "BTC-OTC": "BTC/USD",
+    "ETH-OTC": "ETH/USD", "LTC-OTC": "LTC/USD", "XRP-OTC": "XRP/USD",
+    "SOL-OTC": "SOL/USD", "BNB-OTC": "BNB/USD", "GOLD-OTC": "XAU/USD",
+    "SILVER-OTC": "XAG/USD", "UKBrent-OTC": "BRENT/USD", "USCrude-OTC": "WTI/USD",
 }
 
 def now_ist(): return datetime.now(IST)
@@ -90,7 +100,7 @@ def telegram_poller():
                     elif data=="show_market": send_with_buttons(chat_id, f"Select Market: ({len(SELECTED_PAIRS)} selected)", get_market_keyboard())
                     elif data=="show_tf": send_with_buttons(chat_id, f"Current TF: {TF}m", get_tf_keyboard())
                     elif data.startswith("tf_"): TF=int(data.split("_")[1]); send_reply(chat_id, f"TF set to {TF}m")
-                    elif data=="show_filter": send_reply(chat_id, "Filter: TEST 50% Skip | REAL 60%+ Trade")
+                    elif data=="show_filter": send_reply(chat_id, "Filter: Only REAL 60%+ Trade | TEST Skip")
                     elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - {len(SELECTED_PAIRS)} pairs REAL DATA")
                     elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Bot Stopped")
                     elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} Sel {len(SELECTED_PAIRS)}")
@@ -150,59 +160,35 @@ def analyze(df, pair):
     f3=curr["volume"]<curr["VOL_MA"]*CONFIG["vol_filter_mult"] if not pd.isna(curr["VOL_MA"]) else True
     block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
 
-    if score < 40:
-        return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
-    elif score == 40:
-        sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend}
-    elif score == 60:
-        sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend}
-    elif score == 80 and block_count == 1:
-        sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":80,"win_chance":75,"signal_type":"REAL","trend":trend}
-    elif score == 80 and block_count == 0:
-        sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":80,"win_chance":85,"signal_type":"REAL","trend":trend}
-    elif score == 100:
-        sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        wc = 90 if block_count==1 else 95
-        return {"signal":sig,"score":100,"win_chance":wc,"signal_type":"REAL","trend":trend}
-    else:
-        return {"signal":"HOLD","score":score,"win_chance":score,"signal_type":"HOLD","trend":trend}
+    if score < 40: return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
+    elif score == 40: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend}
+    elif score == 60: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend}
+    elif score == 80 and block_count == 1: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":80,"win_chance":75,"signal_type":"REAL","trend":trend}
+    elif score == 80 and block_count == 0: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":80,"win_chance":85,"signal_type":"REAL","trend":trend}
+    elif score == 100: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; wc = 90 if block_count==1 else 95; return {"signal":sig,"score":100,"win_chance":wc,"signal_type":"REAL","trend":trend}
+    else: return {"signal":"HOLD","score":score,"win_chance":score,"signal_type":"HOLD","trend":trend}
 
-# ===== REAL DATA - NO BLOCK - ONLY REQUESTS =====
 def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
     try:
         symbol = TWELVE_MAP.get(pair, "EUR/USD")
         interval = "1min"
         if tf_minutes == 2: interval = "2min"
         if tf_minutes == 5: interval = "5min"
-
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={count}&apikey=demo"
         r = requests.get(url, timeout=15).json()
-
-        if "values" not in r or len(r["values"]) < 200:
-            # try free alternative - same API retry
-            time.sleep(1)
-            r = requests.get(url, timeout=15).json()
-
         values = r.get("values", [])
         if len(values) < 100:
             print(f"REAL DATA fail {pair}: {r}")
             return None
-
-        values = values[::-1] # oldest first
+        values = values[::-1]
         df = pd.DataFrame(values)
         df["open"] = df["open"].astype(float)
         df["high"] = df["high"].astype(float)
         df["low"] = df["low"].astype(float)
         df["close"] = df["close"].astype(float)
         df["volume"] = 1500
-
         print(f"REAL DATA OK {pair} -> {symbol} {len(df)} candles Last {df['close'].iloc[-1]}")
         return df
-
     except Exception as e:
         print(f"REAL DATA Error {pair}: {e}")
         return None
@@ -220,20 +206,10 @@ def wait_for_early_signal(tf_minutes):
 def format_legend_message(res, pair, entry_time, signal_time):
     direction = "BUY / CALL ↑" if res["signal"]=="BUY" else "SELL / PUT ↓"
     pair_disp = pair.replace("-OTC"," (OTC)")
-    conf = res["win_chance"]
-    raw = res["score"]
-    if res["signal_type"]=="TEST":
-        strength = "WEAK — Skip"
-        bar = "▓░░░░░░░░░"
-    elif conf < 65:
-        strength = "MODERATE"
-        bar = "▓▓▓▓▓░░░░░"
-    elif conf < 85:
-        strength = "STRONG"
-        bar = "▓▓▓▓▓▓▓▓░░"
-    else:
-        strength = "VERY STRONG"
-        bar = "▓▓▓▓▓▓▓▓▓▓"
+    conf = res["win_chance"]; raw = res["score"]
+    if conf < 65: strength = "MODERATE"; bar = "▓▓▓▓▓░░░░░"
+    elif conf < 85: strength = "STRONG"; bar = "▓▓▓▓▓▓▓▓░░"
+    else: strength = "VERY STRONG"; bar = "▓▓▓▓▓▓▓▓▓▓"
     msg = f"""📊 *{pair_disp} | {TF}m*
 *Signal*: {direction}
 *Time*: {entry_time.strftime('%H:%M IST')} (DOT {signal_time.strftime('%H:%M:%S')})
@@ -250,11 +226,9 @@ def format_legend_message(res, pair, entry_time, signal_time):
 
 def run_multi_bot():
     print("Bot REAL DATA No-Leak Mode Live")
-    send_to_owner("Bot Live - REAL Market Data | No Fake Price | No Block")
+    send_to_owner("Bot Live - REAL Market Data | Only 60%+ Signals | No Block")
     while True:
         if not BOT_RUNNING: time.sleep(5); continue
-        today=now_ist().date(); todays=[t for t in daily_trades if t["date"]==today]
-        if len(todays)>=CONFIG["max_trades_per_day"]: time.sleep(3600); continue
         wait_for_early_signal(TF)
         if not BOT_RUNNING: continue
         pairs_to_scan = list(SELECTED_PAIRS)
@@ -266,7 +240,7 @@ def run_multi_bot():
             if df is None: continue
             res=analyze(df,pair)
             if res["signal"] not in ["BUY","SELL"]: continue
-            if res["signal_type"]=="HOLD": continue
+            if res["score"] < 60: continue # FINAL FIX - TEST SKIP
             entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
             signal_time = entry_time - timedelta(seconds=30)
             legend_msg = format_legend_message(res, pair, entry_time, signal_time)
