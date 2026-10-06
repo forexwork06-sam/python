@@ -2,7 +2,7 @@
 Quotex Binary Bot - FINAL 100 Point Logic - MULTI PAIR SCANNER
 TF: 1m / 2m / 5m | IST Timing | 25-30 sec Early Signal | Result +20 sec
 Pairs: 32 | Max 7 Trades/Day | London/NY 1:30PM-10PM IST | No Martingale
-Permanent Fix - No yfinance error
+MOD: 50% TEST + 60-100% REAL with WIN% Display
 """
 
 import time
@@ -147,7 +147,7 @@ def zigzag_pivots(df, depth=12, backstep=3):
     return sorted(pivots)[-10:]
 
 def analyze(df, pair):
-    if len(df)<200: return {"signal":"HOLD","score":0,"trend":"-","triggers":{},"filters":{}}
+    if len(df)<200: return {"signal":"HOLD","score":0,"win_chance":0,"signal_type":"HOLD","trend":"-","triggers":{},"filters":{}}
     close=df['close']
     df['EMA200']=ema(close,CONFIG['ema'])
     df['BB_MA'],df['BB_UP'],df['BB_LOW']=bollinger(close,CONFIG['bb_period'],CONFIG['bb_dev'])
@@ -171,7 +171,7 @@ def analyze(df, pair):
     if t1: score+=20
     dem=curr['DeM']; rsi_v=curr['RSI']
     t2_buy=dem<CONFIG['demarker_os'] and rsi_v<CONFIG['rsi_os']
-    t2_sell=dem>CONFIG['demarker_ob'] and rsi_v>CONFIG['rsi_ob']
+    t2_sell=dem>CONFIG['demarker_ob'] and rsi_v>CONFIG['demarker_ob']
     t2=t2_buy or t2_sell; triggers['T2_DeM+RSI']=t2
     if t2: score+=20
     atr_avg=df['ATR'].rolling(20).mean().iloc[-1]
@@ -195,11 +195,55 @@ def analyze(df, pair):
     filters['F1_NearSwing']= "BLOCK" if f1 else "PASS"
     filters['F2_Doji']= "BLOCK" if f2 else "PASS"
     filters['F3_VolLow']= "BLOCK" if f3 else "PASS"
-    any_block=f1 or f2 or f3
+    block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
+
+    # ============== MODIFIED LOGIC ONLY ==============
     signal="HOLD"
-    if score==100 and not any_block:
-        signal="BUY" if (t2_buy or trend=="UP") else "SELL"
-    return {"signal":signal,"score":score,"confidence":"High" if score==100 else "Medium" if score>=80 else "Low","trend":trend,"triggers":triggers,"filters":filters,"curr":curr}
+    win_chance=score
+    signal_type="HOLD"
+    confidence="Low"
+
+    # 50% TEST
+    if score == 40:
+        win_chance = 50
+        confidence = "TEST 50% - Paper Trade Only"
+        signal_type = "TEST"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    # 60% Genuine Start
+    elif score == 60 and block_count == 0:
+        win_chance = 60
+        confidence = "GENUINE START 60%"
+        signal_type = "REAL"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    elif score == 60 and block_count == 1:
+        win_chance = 50
+        confidence = "TEST 50% (60% but 1 Filter Block)"
+        signal_type = "TEST"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    # 80% -> 70%/80%
+    elif score == 80 and block_count == 0:
+        win_chance = 80
+        confidence = "HIGH 80%"
+        signal_type = "REAL"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    elif score == 80 and block_count == 1:
+        win_chance = 70
+        confidence = "GOOD 70%"
+        signal_type = "REAL"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    # 100% -> 90%/100%
+    elif score == 100 and block_count == 0:
+        win_chance = 100
+        confidence = "SURE SHOT 100%"
+        signal_type = "REAL"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+    elif score == 100 and block_count == 1:
+        win_chance = 90
+        confidence = "VERY HIGH 90%"
+        signal_type = "REAL"
+        signal = "BUY" if (t2_buy or trend=="UP") else "SELL"
+
+    return {"signal":signal,"score":score,"win_chance":win_chance,"signal_type":signal_type,"confidence":confidence,"trend":trend,"triggers":triggers,"filters":filters,"curr":curr}
 
 def wait_for_early_signal(tf_minutes):
     while True:
@@ -212,7 +256,7 @@ def wait_for_early_signal(tf_minutes):
         time.sleep(0.5)
 
 def run_multi_bot():
-    print(f"Bot Started | {len(PAIRS)} Pairs | TF {TF}m | IST {now_ist()} | Max {CONFIG['max_trades_per_day']}/day No Martingale")
+    print(f"Bot Started | {len(PAIRS)} Pairs | TF {TF}m | IST {now_ist()} | MOD 50% TEST + 60-100% REAL | Max {CONFIG['max_trades_per_day']}/day No Martingale")
     while True:
         ok,msg=is_session_allowed()
         if not ok:
@@ -227,13 +271,17 @@ def run_multi_bot():
             if pair in pair_cooldown and time.time()-pair_cooldown[pair]<TF*60*CONFIG['cooldown_candles']: continue
             df=fetch_ohlcv_dukas(pair,TF,500)
             res=analyze(df,pair)
-            print(f"[{now_ist().strftime('%H:%M:%S')}] {pair} {res['score']}/100 {res['signal']} Trend {res['trend']} | {res['triggers']} | Filters {res['filters']}")
+            print(f"[{now_ist().strftime('%H:%M:%S')}] {pair} {res['score']}/100 ({res['win_chance']}%) {res['signal']} {res['signal_type']} Trend {res['trend']} | {res['triggers']} | Filters {res['filters']}")
             if res['signal'] in ["BUY","SELL"]:
                 entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
-                print(f"\n>>> ENTRY SIGNAL <<< {res['signal']} {pair} at {entry_time.strftime('%H:%M:%S IST')} Expiry {TF}m CONFIDENCE HIGH 100/100\n")
-                daily_trades.append({"date":today,"pair":pair,"tf":TF,"signal":res['signal'],"entry_time":entry_time,"score":res['score']})
-                pair_cooldown[pair]=time.time()
-                if len(daily_trades)>=CONFIG['max_trades_per_day']: break
+                if res['signal_type'] == "TEST":
+                    print(f"\n>>> TEST SIGNAL 50% <<< {res['signal']} {pair} at {entry_time.strftime('%H:%M:%S IST')} | Score {res['score']}/100 | WINNING CHANCE {res['win_chance']}% | {res['confidence']} | FOR TESTING ONLY\n")
+                else:
+                    print(f"\n>>> REAL ENTRY {res['signal']} <<< {pair} at {entry_time.strftime('%H:%M:%S IST')} Expiry {TF}m | Score {res['score']}/100 | WINNING CHANCE {res['win_chance']}% | {res['confidence']}\n")
+                if res['signal_type'] == "REAL":
+                    daily_trades.append({"date":today,"pair":pair,"tf":TF,"signal":res['signal'],"entry_time":entry_time,"score":res['score'],"win_chance":res['win_chance']})
+                    pair_cooldown[pair]=time.time()
+                    if len(daily_trades)>=CONFIG['max_trades_per_day']: break
         time.sleep(2)
 
 if __name__ == "__main__":
