@@ -18,11 +18,10 @@ CONFIG = {
     "doji_atr_mult": 0.3, "swing_atr_mult": 0.5,
 }
 
-# Realistic base price map - taaki 1.45 jaisa galat price na aaye
 BASE_PRICE = {
     "EURUSD-OTC": 1.1250, "GBPUSD-OTC": 1.3260, "USDJPY-OTC": 148.50,
     "AUDUSD-OTC": 0.6500, "AUDJPY-OTC": 96.50, "EURJPY-OTC": 167.00,
-    "GBPJPY-OTC": 196.50, "USDCHF-OTC": 0.8950, "USDCAD-OTC": 1.3650
+    "GBPJPY-OTC": 196.50, "USDCHF-OTC": 0.8950, "USDCAD-OTC": 1.3650,
 }
 
 ALL_PAIRS = ["AUDCAD-OTC","AUDCHF-OTC","AUDJPY-OTC","AUDNZD-OTC","AUDUSD-OTC","CADCHF-OTC","CADJPY-OTC","CHFJPY-OTC","EURAUD-OTC","EURCAD-OTC","EURCHF-OTC","EURGBP-OTC","EURJPY-OTC","EURNZD-OTC","EURSGD-OTC","EURUSD-OTC","GBPAUD-OTC","GBPCAD-OTC","GBPCHF-OTC","GBPJPY-OTC","GBPNZD-OTC","GBPUSD-OTC","NZDCAD-OTC","NZDCHF-OTC","NZDJPY-OTC","NZDUSD-OTC","USDCAD-OTC","USDCHF-OTC","USDJPY-OTC","USDBRL-OTC","USDINR-OTC","USDBDT-OTC","USDCOP-OTC","USDDZD-OTC","USDEGP-OTC","USDIDR-OTC","USDNGN-OTC","USDPHP-OTC","USDPKR-OTC","USDZAR-OTC","USDARS-OTC","USDTRY-OTC","USDMXN-OTC","BRLUSD-OTC","BTC-OTC","ETH-OTC","LTC-OTC","XRP-OTC","SOL-OTC","BNB-OTC","TON-OTC","DOT-OTC","AVAX-OTC","MATIC-OTC","GOLD-OTC","SILVER-OTC","UKBrent-OTC","USCrude-OTC"]
@@ -57,11 +56,11 @@ def get_tf_keyboard():
     return {"inline_keyboard": [[{"text": "1m", "callback_data": "tf_1"}, {"text": "2m", "callback_data": "tf_2"}, {"text": "5m", "callback_data": "tf_5"}],[{"text": "⬅️ Back", "callback_data": "back_panel"}]]}
 def get_panel():
     s="RUNNING" if BOT_RUNNING else "STOPPED"
-    return f"SAM.AI FINAL {s}\nSelected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m\nTEST=50% Skip | REAL=60%+ Trade"
+    return f"SAM.AI FINAL {s}\nSelected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
-    print("Poller START Bot FINAL TICK MODE Fixed Legend Style")
+    print("Poller START Bot FINAL No-Leak Mode")
     try: requests.get("https://api.telegram.org/bot"+BOT_TOKEN+"/deleteWebhook?drop_pending_updates=True", timeout=5)
     except: pass
     offset=0
@@ -116,7 +115,7 @@ def zigzag_pivots(df, depth=12, backstep=3):
     return sorted(pivots)[-10:]
 
 def analyze(df, pair):
-    if len(df)<200: return {"signal":"HOLD","score":0,"win_chance":0,"signal_type":"HOLD","trend":"-","curr":df.iloc[-1],"confidence":"Low"}
+    if len(df)<200: return {"signal":"HOLD","score":0,"win_chance":0,"signal_type":"HOLD","trend":"-"}
     close=df["close"]
     df["EMA200"]=ema(close,CONFIG["ema"]); df["BB_MA"],df["BB_UP"],df["BB_LOW"]=bollinger(close,CONFIG["bb_period"],CONFIG["bb_dev"]); df["RSI"]=rsi(close,CONFIG["rsi_period"]); df["ATR"]=atr(df,CONFIG["atr_period"]); df["VOL_MA"]=df["volume"].rolling(CONFIG["vol_ma"]).mean(); df["DeM"]=demarker(df,CONFIG["demarker_period"])
     curr=df.iloc[-1]; trend="UP" if curr["close"]>curr["EMA200"] else "DOWN"; score=0; pivots=zigzag_pivots(df)
@@ -147,28 +146,27 @@ def analyze(df, pair):
     block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
 
     if score < 40:
-        return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend,"curr":curr,"confidence":"LOW OFF"}
+        return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
     elif score == 40:
         sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend,"curr":curr,"confidence":"TEST 50%"}
+        return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend}
     elif score == 60:
         sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend,"curr":curr,"confidence":"REAL 60%"}
+        return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend}
     elif score == 80 and block_count == 1:
         sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":80,"win_chance":75,"signal_type":"REAL","trend":trend,"curr":curr,"confidence":"REAL 75%"}
+        return {"signal":sig,"score":80,"win_chance":75,"signal_type":"REAL","trend":trend}
     elif score == 80 and block_count == 0:
         sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
-        return {"signal":sig,"score":80,"win_chance":85,"signal_type":"REAL","trend":trend,"curr":curr,"confidence":"REAL 85%"}
+        return {"signal":sig,"score":80,"win_chance":85,"signal_type":"REAL","trend":trend}
     elif score == 100:
         sig = "BUY" if (t2_buy or trend=="UP") else "SELL"
         wc = 90 if block_count==1 else 95
-        return {"signal":sig,"score":100,"win_chance":wc,"signal_type":"REAL","trend":trend,"curr":curr,"confidence":"REAL 95%"}
+        return {"signal":sig,"score":100,"win_chance":wc,"signal_type":"REAL","trend":trend}
     else:
-        return {"signal":"HOLD","score":score,"win_chance":score,"signal_type":"HOLD","trend":trend,"curr":curr,"confidence":"HOLD"}
+        return {"signal":"HOLD","score":score,"win_chance":score,"signal_type":"HOLD","trend":trend}
 
 def fetch_ohlcv_dukas(pair, tf_minutes, count=500):
-    # Deterministic seed per minute + realistic base
     minute_key = now_ist().strftime("%Y%m%d%H%M")
     seed = abs(hash(pair + minute_key)) % (2**32)
     np.random.seed(seed)
@@ -204,55 +202,46 @@ def check_result_and_send(pair, signal, entry_price, entry_time, score, win_chan
         try:
             df=fetch_ohlcv_dukas(pair, tf_minutes, 10)
             exit_price=float(df["close"].iloc[-1])
-            # Win/Loss based on candle close vs entry - more accurate
             win=(signal=="BUY" and exit_price>entry_price) or (signal=="SELL" and exit_price<entry_price)
             result_icon = "✅ WIN" if win else "❌ LOSS"
-            if signal_type=="TEST":
-                msg = f"{result_icon} {pair} {signal} {win_chance}%\nResult at {now_ist().strftime('%H:%M:%S')}"
-            else:
-                msg = f"{result_icon} {pair} {signal} {win_chance}%\nResult at {now_ist().strftime('%H:%M:%S')}"
+            msg = f"{result_icon} {pair} {signal} {win_chance}%"
             send_to_owner(msg)
         except: pass
     threading.Thread(target=task, daemon=True).start()
 
-def format_legend_message(res, pair, entry_time, signal_time, price):
+def format_legend_message(res, pair, entry_time, signal_time):
     direction = "BUY / CALL ↑" if res["signal"]=="BUY" else "SELL / PUT ↓"
     pair_disp = pair.replace("-OTC"," (OTC)")
     conf = res["win_chance"]
     raw = res["score"]
     if res["signal_type"]=="TEST":
-        strength = "WEAK SIGNAL — Skip this trade"
-        conf_text = f"{conf}% - TEST"
+        strength = "WEAK — Skip"
         bar = "▓░░░░░░░░░"
     elif conf < 65:
-        strength = "MODERATE — Trade with caution"
-        conf_text = f"{conf}% - REAL"
+        strength = "MODERATE"
         bar = "▓▓▓▓▓░░░░░"
     elif conf < 85:
-        strength = "STRONG — High confluence"
-        conf_text = f"{conf}% - REAL"
+        strength = "STRONG"
         bar = "▓▓▓▓▓▓▓▓░░"
     else:
         strength = "VERY STRONG"
-        conf_text = f"{conf}% - REAL"
         bar = "▓▓▓▓▓▓▓▓▓▓"
-
     msg = f"""📊 *{pair_disp} | {TF}m*
 *Signal*: {direction}
 *Time*: {entry_time.strftime('%H:%M IST')} (DOT {signal_time.strftime('%H:%M:%S')})
 
-*Score*: {conf_text}
+*Score*: {conf}% - {res["signal_type"]}
 {bar} {raw}/100
 
 {strength}
 
-*Entry*: Next candle open
-*Result*: Will update at {(entry_time + timedelta(minutes=TF)).strftime('%H:%M:%S')}
+*Entry*: Next candle
+*Result*: { (entry_time + timedelta(minutes=TF)).strftime('%H:%M:%S') }
 """
     return msg
 
 def run_multi_bot():
-    print("Bot FINAL TICK MODE Fixed Legend")
+    print("Bot FINAL No-Leak Mode Live")
     send_to_owner("Bot Live - No Trigger Leak | Fixed Price Feed")
     while True:
         if not BOT_RUNNING: time.sleep(5); continue
@@ -269,8 +258,8 @@ def run_multi_bot():
             if res["signal"] not in ["BUY","SELL"]: continue
             if res["signal_type"]=="HOLD": continue
             entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
-            entry_price=float(res["curr"]["close"]); signal_time = entry_time - timedelta(seconds=30)
-            legend_msg = format_legend_message(res, pair, entry_time, signal_time, entry_price)
+            entry_price=float(df["close"].iloc[-1]); signal_time = entry_time - timedelta(seconds=30)
+            legend_msg = format_legend_message(res, pair, entry_time, signal_time)
             send_to_owner(legend_msg)
             pair_cooldown[pair]=time.time()
             check_result_and_send(pair, res["signal"], entry_price, entry_time, res["score"], res["win_chance"], res["signal_type"], TF)
