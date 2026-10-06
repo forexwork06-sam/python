@@ -1,6 +1,5 @@
-pyTelegramBotAPI
 pandas
-ta
-yfinance
-curl_cffi
+numpy
 pytz
+requests
+python-dateutil
