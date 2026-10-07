@@ -6,24 +6,20 @@ import pytz
 
 IST = pytz.timezone('Asia/Kolkata')
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID_RAW = str(os.getenv("OWNER_ID", "")).strip()
 
-# ========= PERFECT BOT MULTI-ID WHITELIST LOCK SYSTEM =========
 def get_authorized_ids():
-    raw = os.getenv("OWNER_ID", "").strip()
-    if not raw:
-        return []
-    # comma se split karke saare IDs nikalega
-    ids = [x.strip() for x in raw.split(",") if x.strip()!= ""]
+    ids = []
+    if not OWNER_ID_RAW:
+        return ids
+    for x in OWNER_ID_RAW.split(","):
+        x = x.strip()
+        if x:
+            ids.append(x)
     return ids
 
-def is_owner_authorized():
-    return len(get_authorized_ids()) > 0
-
-def check_auth(chat_id):
-    auth_ids = get_authorized_ids()
-    if not auth_ids:
-        return False
-    return str(chat_id) in auth_ids
+def is_authorized(chat_id):
+    return str(chat_id) in get_authorized_ids()
 
 CONFIG = {
     "max_trades_per_day": 10, "cooldown_candles": 2,
@@ -35,40 +31,36 @@ CONFIG = {
     "doji_atr_mult": 0.3, "swing_atr_mult": 0.5,
 }
 
-# ========= ONLY 4 PAIRS - LOW MANIPULATION =========
-ALL_PAIRS = ["EURUSD-OTC","GBPJPY-OTC","AUDUSD-OTC","EURJPY-OTC"]
-SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC","AUDUSD-OTC","EURJPY-OTC"])
+# ===== ONLY 4 PAIRS - ALL OTHER PAIRS REMOVED =====
+ALL_PAIRS = ["EURUSD-OTC","GBPJPY-OTC","EURJPY-OTC","GBPUSD-OTC"]
+SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC","EURJPY-OTC","GBPUSD-OTC"])
+
 TF = 1
 BOT_RUNNING = False
 pair_cooldown = {}
-daily_trades = []
 
+# ===== ONLY 4 PAIRS MAP - BAKI SAB HATA DIYA =====
 TWELVE_MAP = {
-    "EURUSD-OTC": "EUR/USD", "GBPJPY-OTC": "GBP/JPY",
-    "AUDUSD-OTC": "AUD/USD", "EURJPY-OTC": "EUR/JPY",
+    "EURUSD-OTC": "EUR/USD",
+    "GBPJPY-OTC": "GBP/JPY",
+    "EURJPY-OTC": "EUR/JPY",
+    "GBPUSD-OTC": "GBP/USD",
 }
 
 def now_ist(): return datetime.now(IST)
 
-def send_to_all_authorized(text):
-    auth_ids = get_authorized_ids()
-    if not auth_ids:
-        print("🔒 Perfect Bot Locked - No IDs in OWNER_ID")
-        return
-    for oid in auth_ids:
+def send_to_owner(text):
+    for oid in get_authorized_ids():
         try:
-            requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage",
-            data={"chat_id": oid, "text": text, "parse_mode": "Markdown"}, timeout=10)
+            requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": oid, "text": text, "parse_mode": "Markdown"}, timeout=10)
         except: pass
 
 def send_reply(chat_id, text):
-    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage",
-    data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}, timeout=10)
+    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
 def send_with_buttons(chat_id, text, keyboard):
-    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage",
-    data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown", "reply_markup": json.dumps(keyboard)}, timeout=15)
+    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown", "reply_markup": json.dumps(keyboard)}, timeout=15)
     except: pass
 
 def get_market_keyboard():
@@ -77,7 +69,6 @@ def get_market_keyboard():
         disp=pair.replace("-OTC"," (OTC)")
         btn="✅ "+disp if pair in SELECTED_PAIRS else disp
         kb.append([{"text": btn, "callback_data": "toggle_"+pair}])
-    kb.append([{"text": "✅ Select All", "callback_data": "pairs_all"}, {"text": "❌ Deselect All", "callback_data": "pairs_none"}])
     kb.append([{"text": "⬅️ Back", "callback_data": "back_panel"}])
     return {"inline_keyboard": kb}
 
@@ -88,17 +79,13 @@ def get_tf_keyboard():
     return {"inline_keyboard": [[{"text": "1m", "callback_data": "tf_1"}, {"text": "2m", "callback_data": "tf_2"}, {"text": "5m", "callback_data": "tf_5"}],[{"text": "⬅️ Back", "callback_data": "back_panel"}]]}
 
 def get_panel():
-    if not is_owner_authorized():
-        return "🔒 PERFECT BOT LOCKED\nContact Admin to Unlock"
     s="RUNNING" if BOT_RUNNING else "STOPPED"
-    return f"""PERFECT BOT REAL DATA {s}
-Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m
-Authorized Users: {len(get_authorized_ids())}"""
+    return f"""SAM AI REAL DATA {s}
+Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"""
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
-    print("PERFECT BOT - Poller START with Multi-ID Whitelist")
-
+    print("Poller START - 4 Pairs Only")
     try: requests.get("https://api.telegram.org/bot"+BOT_TOKEN+"/deleteWebhook?drop_pending_updates=True", timeout=5)
     except: pass
     offset=0
@@ -108,24 +95,9 @@ def telegram_poller():
             if not r.get("ok"): time.sleep(2); continue
             for upd in r.get("result",[]):
                 offset=upd["update_id"]+1
-                chat_id_tmp = ""
-                if "callback_query" in upd:
-                    chat_id_tmp = str(upd["callback_query"]["message"]["chat"]["id"])
-                elif "message" in upd:
-                    chat_id_tmp = str(upd["message"]["chat"]["id"])
-
-                # WHITELIST CHECK - ID nahi hai to LOCK
-                if not check_auth(chat_id_tmp):
-                    if chat_id_tmp:
-                        # Agar OWNER_ID khali hai toh pura bot locked
-                        if not is_owner_authorized():
-                            send_reply(chat_id_tmp, "🔒 *PERFECT BOT LOCKED*\n\nBot ID not configured.\nContact Admin: @Perfect Bot")
-                        else:
-                            send_reply(chat_id_tmp, "🔒 *PERFECT BOT LOCKED*\n\nYour subscription expired.\nYou are not authorized to use this bot.\nContact Admin to Renew.")
-                    continue
-
                 if "callback_query" in upd:
                     cq=upd["callback_query"]; chat_id=str(cq["message"]["chat"]["id"]); data=cq["data"]; msg_id=cq["message"]["message_id"]
+                    if not is_authorized(chat_id): continue
                     try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/answerCallbackQuery", data={"callback_query_id": cq["id"]}, timeout=5)
                     except: pass
                     if data.startswith("toggle_"):
@@ -134,18 +106,19 @@ def telegram_poller():
                         else: SELECTED_PAIRS.add(p)
                         try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/editMessageText", data={"chat_id": chat_id, "message_id": msg_id, "text": f"Select Market: ({len(SELECTED_PAIRS)} selected)", "reply_markup": json.dumps(get_market_keyboard())}, timeout=10)
                         except: pass
-                    elif data=="pairs_all": SELECTED_PAIRS=set(ALL_PAIRS)
-                    elif data=="pairs_none": SELECTED_PAIRS=set()
                     elif data=="show_market": send_with_buttons(chat_id, f"Select Market: ({len(SELECTED_PAIRS)} selected)", get_market_keyboard())
                     elif data=="show_tf": send_with_buttons(chat_id, f"Current TF: {TF}m", get_tf_keyboard())
                     elif data.startswith("tf_"): TF=int(data.split("_")[1]); send_reply(chat_id, f"TF set to {TF}m")
-                    elif data=="show_filter": send_reply(chat_id, "Filter: Only REAL 60%+ Trade | TEST Skip")
-                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Perfect Bot Started - {len(SELECTED_PAIRS)} pairs REAL DATA")
-                    elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Perfect Bot Stopped")
-                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} Sel {len(SELECTED_PAIRS)} Auth {len(get_authorized_ids())}")
+                    elif data=="show_filter": send_reply(chat_id, "Filter: Only REAL 60%+ Trade")
+                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - 4 Pairs Only REAL DATA")
+                    elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Bot Stopped")
+                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} - 4 Pairs")
                     elif data=="back_panel": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                     continue
                 msg=upd.get("message",{}); chat_id=str(msg.get("chat",{}).get("id","")); text=msg.get("text","").strip()
+                if not is_authorized(chat_id) and text.startswith("/"):
+                    send_reply(chat_id, "🔒 Unauthorized. Contact Admin")
+                    continue
                 if text=="/start": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                 elif text.startswith("/"): send_with_buttons(chat_id, get_panel(), get_control_keyboard())
         except Exception as e:
@@ -198,7 +171,6 @@ def analyze(df, pair):
     f2=body<CONFIG["doji_atr_mult"]*atr_val
     f3=curr["volume"]<curr["VOL_MA"]*CONFIG["vol_filter_mult"] if not pd.isna(curr["VOL_MA"]) else True
     block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
-
     if score < 40: return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
     elif score == 40: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend}
     elif score == 60: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend}
@@ -250,23 +222,17 @@ def format_legend_message(res, pair, entry_time, signal_time):
 {bar} {raw}/100
 {strength}
 *Entry*: Next candle
-*Perfect Bot - Real Market Data*
+*Real Market Data*
 """
     return msg
 
 def run_multi_bot():
-    print("Perfect Bot REAL DATA Live with Multi Whitelist")
-    if not is_owner_authorized():
-        print("🔒 Perfect Bot Locked - OWNER_ID Missing")
-        return
-    send_to_all_authorized(f"Perfect Bot Live - {len(get_authorized_ids())} Users | 4 Pairs Only")
+    global BOT_RUNNING
+    print("Bot REAL DATA - 4 Pairs Only")
     while True:
         if not BOT_RUNNING: time.sleep(5); continue
         wait_for_early_signal(TF)
         if not BOT_RUNNING: continue
-        if not is_owner_authorized():
-            BOT_RUNNING=False
-            continue
         pairs_to_scan = list(SELECTED_PAIRS)
         if len(pairs_to_scan)==0: time.sleep(5); continue
         signal_found = False
@@ -280,7 +246,7 @@ def run_multi_bot():
             entry_time=(now_ist()+timedelta(seconds=(60-now_ist().second))).replace(microsecond=0)
             signal_time = entry_time - timedelta(seconds=30)
             legend_msg = format_legend_message(res, pair, entry_time, signal_time)
-            send_to_all_authorized(legend_msg)
+            send_to_owner(legend_msg)
             pair_cooldown[pair]=time.time()
             signal_found = True
             break
