@@ -33,7 +33,7 @@ CONFIG = {
 
 # ===== ONLY 4 PAIRS - ALL OTHER PAIRS REMOVED =====
 ALL_PAIRS = ["EURUSD-OTC","GBPJPY-OTC","EURJPY-OTC","GBPUSD-OTC"]
-SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC","EURJPY-OTC","GBPUSD-OTC"])
+SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC"]) # FIX: Default 2 kar diya, pehle 4 tha isliye auto 4 ho jata tha
 
 TF = 1
 BOT_RUNNING = False
@@ -102,17 +102,25 @@ def telegram_poller():
                     except: pass
                     if data.startswith("toggle_"):
                         p=data.replace("toggle_","")
-                        if p in SELECTED_PAIRS: SELECTED_PAIRS.remove(p)
-                        else: SELECTED_PAIRS.add(p)
+                        # FIX: 2 pairs ka lock + glitch fix
+                        if p in SELECTED_PAIRS:
+                            SELECTED_PAIRS.remove(p)
+                        else:
+                            if len(SELECTED_PAIRS) >= 2:
+                                try:
+                                    requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/answerCallbackQuery", data={"callback_query_id": cq["id"], "text": "⚠️ 2 PAIRS se zyada select mat karo, BOT CRASH ho jayega! Admin responsible nahi hai.", "show_alert": True}, timeout=5)
+                                except: pass
+                            else:
+                                SELECTED_PAIRS.add(p)
                         try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/editMessageText", data={"chat_id": chat_id, "message_id": msg_id, "text": f"Select Market: ({len(SELECTED_PAIRS)} selected)", "reply_markup": json.dumps(get_market_keyboard())}, timeout=10)
                         except: pass
                     elif data=="show_market": send_with_buttons(chat_id, f"Select Market: ({len(SELECTED_PAIRS)} selected)", get_market_keyboard())
                     elif data=="show_tf": send_with_buttons(chat_id, f"Current TF: {TF}m", get_tf_keyboard())
                     elif data.startswith("tf_"): TF=int(data.split("_")[1]); send_reply(chat_id, f"TF set to {TF}m")
                     elif data=="show_filter": send_reply(chat_id, "Filter: Only REAL 60%+ Trade")
-                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - 4 Pairs Only REAL DATA")
+                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - {len(SELECTED_PAIRS)} Pairs Only REAL DATA") # FIX: Dynamic kar diya
                     elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Bot Stopped")
-                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} - 4 Pairs")
+                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} - {len(SELECTED_PAIRS)} Pairs") # FIX: Dynamic kar diya
                     elif data=="back_panel": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                     continue
                 msg=upd.get("message",{}); chat_id=str(msg.get("chat",{}).get("id","")); text=msg.get("text","").strip()
