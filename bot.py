@@ -80,7 +80,7 @@ def get_tf_keyboard():
 
 def get_panel():
     s="RUNNING" if BOT_RUNNING else "STOPPED"
-    return f"""SAM AI REAL DATA {s}
+    return f"""PERFECT AI REAL DATA {s}
 Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"""
 
 def telegram_poller():
