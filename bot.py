@@ -31,15 +31,12 @@ CONFIG = {
     "doji_atr_mult": 0.3, "swing_atr_mult": 0.5,
 }
 
-# ===== ONLY 4 PAIRS - ALL OTHER PAIRS REMOVED =====
 ALL_PAIRS = ["EURUSD-OTC","GBPJPY-OTC","EURJPY-OTC","GBPUSD-OTC"]
-SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC"]) # FIX: Default 2 kar diya, pehle 4 tha isliye auto 4 ho jata tha
-
+SELECTED_PAIRS = set(["EURUSD-OTC","GBPJPY-OTC"])
 TF = 1
 BOT_RUNNING = False
 pair_cooldown = {}
 
-# ===== ONLY 4 PAIRS MAP - BAKI SAB HATA DIYA =====
 TWELVE_MAP = {
     "EURUSD-OTC": "EUR/USD",
     "GBPJPY-OTC": "GBP/JPY",
@@ -52,16 +49,17 @@ def now_ist(): return datetime.now(IST)
 def send_to_owner(text):
     for oid in get_authorized_ids():
         try:
-            requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": oid, "text": text, "parse_mode": "Markdown"}, timeout=10)
-        except: pass
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": oid, "text": text, "parse_mode": "Markdown"}, timeout=10)
+        except Exception as e:
+            print(f"send_to_owner fail {e}")
 
 def send_reply(chat_id, text):
-    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except Exception as e: print(f"send_reply fail {e}")
 
 def send_with_buttons(chat_id, text, keyboard):
-    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown", "reply_markup": json.dumps(keyboard)}, timeout=15)
-    except: pass
+    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown", "reply_markup": json.dumps(keyboard)}, timeout=15)
+    except Exception as e: print(f"send_with_buttons fail {e}")
 
 def get_market_keyboard():
     kb=[]
@@ -85,42 +83,49 @@ Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"""
 
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
-    print("Poller START - 4 Pairs Only")
-    try: requests.get("https://api.telegram.org/bot"+BOT_TOKEN+"/deleteWebhook?drop_pending_updates=True", timeout=5)
-    except: pass
+    print("Poller START - 4 Pairs OnlyBot REAL DATA - 4 Pairs Only")
+    # --- FIX 1: Webhook delete with retry ---
+    for _ in range(3):
+        try:
+            requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=True", timeout=10)
+            break
+        except: time.sleep(5)
+
     offset=0
     while True:
         try:
-            r=requests.get("https://api.telegram.org/bot"+BOT_TOKEN+"/getUpdates?offset="+str(offset)+"&timeout=30", timeout=35).json()
-            if not r.get("ok"): time.sleep(2); continue
+            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=30", timeout=35).json()
+            if not r.get("ok"):
+                print(f"getUpdates not ok: {r}")
+                time.sleep(2)
+                continue
             for upd in r.get("result",[]):
                 offset=upd["update_id"]+1
                 if "callback_query" in upd:
                     cq=upd["callback_query"]; chat_id=str(cq["message"]["chat"]["id"]); data=cq["data"]; msg_id=cq["message"]["message_id"]
                     if not is_authorized(chat_id): continue
-                    try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/answerCallbackQuery", data={"callback_query_id": cq["id"]}, timeout=5)
+                    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", data={"callback_query_id": cq["id"]}, timeout=5)
                     except: pass
                     if data.startswith("toggle_"):
                         p=data.replace("toggle_","")
-                        # FIX: 2 pairs ka lock + glitch fix
                         if p in SELECTED_PAIRS:
                             SELECTED_PAIRS.remove(p)
                         else:
                             if len(SELECTED_PAIRS) >= 2:
                                 try:
-                                    requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/answerCallbackQuery", data={"callback_query_id": cq["id"], "text": "⚠️ 2 PAIRS se zyada select mat karo, BOT CRASH ho jayega! Admin responsible nahi hai.", "show_alert": True}, timeout=5)
+                                    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery", data={"callback_query_id": cq["id"], "text": "⚠️ 2 PAIRS se zyada select mat karo, BOT CRASH ho jayega! Admin responsible nahi hai.", "show_alert": True}, timeout=5)
                                 except: pass
                             else:
                                 SELECTED_PAIRS.add(p)
-                        try: requests.post("https://api.telegram.org/bot"+BOT_TOKEN+"/editMessageText", data={"chat_id": chat_id, "message_id": msg_id, "text": f"Select Market: ({len(SELECTED_PAIRS)} selected)", "reply_markup": json.dumps(get_market_keyboard())}, timeout=10)
+                        try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText", data={"chat_id": chat_id, "message_id": msg_id, "text": f"Select Market: ({len(SELECTED_PAIRS)} selected)", "reply_markup": json.dumps(get_market_keyboard())}, timeout=10)
                         except: pass
                     elif data=="show_market": send_with_buttons(chat_id, f"Select Market: ({len(SELECTED_PAIRS)} selected)", get_market_keyboard())
                     elif data=="show_tf": send_with_buttons(chat_id, f"Current TF: {TF}m", get_tf_keyboard())
                     elif data.startswith("tf_"): TF=int(data.split("_")[1]); send_reply(chat_id, f"TF set to {TF}m")
                     elif data=="show_filter": send_reply(chat_id, "Filter: Only REAL 60%+ Trade")
-                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - {len(SELECTED_PAIRS)} Pairs Only REAL DATA") # FIX: Dynamic kar diya
+                    elif data=="startbot": BOT_RUNNING=True; send_reply(chat_id, f"Bot Started - {len(SELECTED_PAIRS)} Pairs Only REAL DATA")
                     elif data=="stopbot": BOT_RUNNING=False; send_reply(chat_id, "Bot Stopped")
-                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} - {len(SELECTED_PAIRS)} Pairs") # FIX: Dynamic kar diya
+                    elif data=="status": send_reply(chat_id, f"Status {'RUNNING' if BOT_RUNNING else 'STOPPED'} - {len(SELECTED_PAIRS)} Pairs")
                     elif data=="back_panel": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                     continue
                 msg=upd.get("message",{}); chat_id=str(msg.get("chat",{}).get("id","")); text=msg.get("text","").strip()
@@ -130,9 +135,12 @@ def telegram_poller():
                 if text=="/start": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                 elif text.startswith("/"): send_with_buttons(chat_id, get_panel(), get_control_keyboard())
         except Exception as e:
-            print("Poller Err", e); time.sleep(2)
-        time.sleep(1)
+            # --- FIX 2: Yehi tera error tha, ab yaha 15 sec wait karega ---
+            print(f"Poller Err {e} - Network is unreachable, retrying in 15s")
+            time.sleep(15)
+            continue
 
+#... Baki saare functions same rakhe hai - ema, rsi, bollinger etc...
 def ema(s,p): return s.ewm(span=p, adjust=False).mean()
 def rsi(s,p=5):
     d=s.diff(); g=(d.where(d>0,0)).ewm(alpha=1/p).mean(); l=(-d.where(d<0,0)).ewm(alpha=1/p).mean(); rs=g/l; return 100-(100/(1+rs))
@@ -262,5 +270,9 @@ def run_multi_bot():
         else: time.sleep(2)
 
 if __name__ == "__main__":
-    threading.Thread(target=telegram_poller, daemon=True).start()
-    run_multi_bot()
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN missing!")
+    else:
+        print(f"Authorized IDs: {get_authorized_ids()}")
+        threading.Thread(target=telegram_poller, daemon=True).start()
+        run_multi_bot()
