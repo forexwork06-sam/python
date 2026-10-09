@@ -50,16 +50,15 @@ def send_to_owner(text):
     for oid in get_authorized_ids():
         try:
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": oid, "text": text, "parse_mode": "Markdown"}, timeout=10)
-        except Exception as e:
-            print(f"send_to_owner fail {e}")
+        except: pass
 
 def send_reply(chat_id, text):
     try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except Exception as e: print(f"send_reply fail {e}")
+    except: pass
 
 def send_with_buttons(chat_id, text, keyboard):
     try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": str(chat_id), "text": text, "parse_mode": "Markdown", "reply_markup": json.dumps(keyboard)}, timeout=15)
-    except Exception as e: print(f"send_with_buttons fail {e}")
+    except: pass
 
 def get_market_keyboard():
     kb=[]
@@ -84,21 +83,31 @@ Selected: {len(SELECTED_PAIRS)} pairs | TF: {TF}m"""
 def telegram_poller():
     global SELECTED_PAIRS, TF, BOT_RUNNING
     print("Poller START - 4 Pairs OnlyBot REAL DATA - 4 Pairs Only")
-    # --- FIX 1: Webhook delete with retry ---
-    for _ in range(3):
-        try:
-            requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=True", timeout=10)
-            break
-        except: time.sleep(5)
+    try:
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=True", timeout=10)
+        print("Webhook deleted, waiting 5s for old instance to die...")
+        time.sleep(5)
+    except: pass
 
     offset=0
     while True:
         try:
-            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=30", timeout=35).json()
+            resp = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={offset}&timeout=30", timeout=35)
+            r = resp.json()
+
             if not r.get("ok"):
+                err_str = str(r)
+                if "Conflict" in err_str or "409" in err_str or resp.status_code == 409:
+                    print(f"409 Conflict - Doosra instance abhi bhi chal raha hai, 30s wait kar raha hu...")
+                    time.sleep(30)
+                    try:
+                        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=True", timeout=10)
+                    except: pass
+                    continue
                 print(f"getUpdates not ok: {r}")
-                time.sleep(2)
+                time.sleep(3)
                 continue
+
             for upd in r.get("result",[]):
                 offset=upd["update_id"]+1
                 if "callback_query" in upd:
@@ -135,12 +144,10 @@ def telegram_poller():
                 if text=="/start": send_with_buttons(chat_id, get_panel(), get_control_keyboard())
                 elif text.startswith("/"): send_with_buttons(chat_id, get_panel(), get_control_keyboard())
         except Exception as e:
-            # --- FIX 2: Yehi tera error tha, ab yaha 15 sec wait karega ---
-            print(f"Poller Err {e} - Network is unreachable, retrying in 15s")
+            print(f"Poller Err {e} - retrying in 15s")
             time.sleep(15)
             continue
 
-#... Baki saare functions same rakhe hai - ema, rsi, bollinger etc...
 def ema(s,p): return s.ewm(span=p, adjust=False).mean()
 def rsi(s,p=5):
     d=s.diff(); g=(d.where(d>0,0)).ewm(alpha=1/p).mean(); l=(-d.where(d<0,0)).ewm(alpha=1/p).mean(); rs=g/l; return 100-(100/(1+rs))
