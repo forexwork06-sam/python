@@ -194,8 +194,7 @@ def analyze(df, pair):
     f2=body<CONFIG["doji_atr_mult"]*atr_val
     f3=curr["volume"]<curr["VOL_MA"]*CONFIG["vol_filter_mult"] if not pd.isna(curr["VOL_MA"]) else True
     block_count = (1 if f1 else 0) + (1 if f2 else 0) + (1 if f3 else 0)
-    if score < 40: return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
-    elif score == 40: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":40,"win_chance":50,"signal_type":"TEST","trend":trend}
+    if score < 60: return {"signal":"HOLD","score":score,"win_chance":0,"signal_type":"HOLD","trend":trend}
     elif score == 60: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":60,"win_chance":60,"signal_type":"REAL","trend":trend}
     elif score == 80 and block_count == 1: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":80,"win_chance":75,"signal_type":"REAL","trend":trend}
     elif score == 80 and block_count == 0: sig = "BUY" if (t2_buy or trend=="UP") else "SELL"; return {"signal":sig,"score":80,"win_chance":85,"signal_type":"REAL","trend":trend}
